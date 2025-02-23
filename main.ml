@@ -38,6 +38,8 @@ and cool_type = id
 (*id option for optional inheritance*)
 (* a class is an identifier, with an optoinal idenfier (superclass), the class has a list of features.*)
 and cool_class = id * (id option) * feature list
+
+(*variant types use to pattern match accross different expressions*)
 and feature =
   | Attribute of id * cool_type * (exp option) (*attribute is an identifier with a type, with an optional expression (initalizer)*)
   | Method of id * (formal list) * cool_type * exp
@@ -167,7 +169,6 @@ let main () = begin
 information so you can do the checks more easily.*)
 
   (*
-  loop through cool program for cool classes.
   look for inheritance from int
   look for inheritance from undeclared class
   *)
@@ -185,6 +186,21 @@ information so you can do the checks more easily.*)
         exit 1
       end;
    ) ast;
+
+  (*
+      look for redeclaration of class
+      since the class names are sorted, we can simply check if the next is equal to current.
+  *)
+  let rec check_redeclaration class_list = match class_list with
+  | [] | [_] -> ()
+  | h1 :: h2 :: t ->
+    if h1=h2 then begin
+      printf "ERROR: cannot redeclare class %s!\n" h2;
+      exit 1
+    end;
+    check_redeclaration (h2::t) in
+
+  check_redeclaration all_classes;
 
    (* DONE WITH ERROR CHECKING *)
 
@@ -207,6 +223,17 @@ information so you can do the checks more easily.*)
     fprintf fout "%s\n" cname;
 
     (*extract attributes classes in the ast*)
+   (* NEED TO CONSIDER ATTRIBUTES FROM BASE CLASSES 
+   hard part is considering inheritance
+    1. construct a mapping from child to parent
+      use toposort here to find the right order of traversal (or detect inheritance cycles)
+    2. recursively walk up mapping until get object
+    3. add in all of attributes that we find
+    4. while there look for attribute override problems.
+
+    we use toposort to find the right order to gather up attributes
+      need to do this to correctly consider shadowing.
+   *)
     let attributes =
       try
         let _,inherits,features = List.find (fun ((_,cname2),_,_) -> cname = cname2) ast in

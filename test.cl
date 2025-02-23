@@ -7,4 +7,11 @@ class Main {
 };
 
 
+class A{
+
+};
+
+class A{
+
+};
 

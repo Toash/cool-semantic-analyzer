@@ -1,4 +1,4 @@
-1
+3
 1
 Main
 no_inherits
@@ -28,3 +28,11 @@ Object
 5
 integer
 1337
+10
+A
+no_inherits
+0
+14
+A
+no_inherits
+0

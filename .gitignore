@@ -2,3 +2,4 @@ a.out
 *.cmi
 *.cmo
 *.cl-type
+testing.ml
