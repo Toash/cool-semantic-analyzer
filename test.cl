@@ -1,8 +1,10 @@
 class Main {
-	x: Int<-1;
-	y:Object <-2;
+	x: Int<-420;
+	y:Object <-69;
+	main() : Object{
+		1337
+	};
 };
 
-class OtherClass{
-	z: Int;
-};
+
+

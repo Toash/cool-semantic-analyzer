@@ -11,8 +11,18 @@ https://www.youtube.com/watch?v=Wa9zMygcv_M&ab_channel=WestleyWeimer
 
 (*
 WE ARE DECLARING RECURSIVE DATA STRUCTURES FOR ENCODING COOL AST
+
 When declaring types, the * creates a tuple
+| indicates different forms for variant types.
+ie a feature can be a Method or an Attribute
+
 The and keyword allows you to reference other types in a type definitoin
+  ie using other types to define a type
+
+Declaring types allows us to define the valid types that methods can return
+ie a method will return a feature, which can either be a Method or Attribute.
+
+They are also self documenting.
 *)
 
 open Printf
@@ -40,8 +50,6 @@ and exp_kind =
 
 let main () = begin 
 
-  printf "started main()\n";
-
   (* de serialize cl-ast file*)
   let fname = Sys.argv.(1) in
 
@@ -52,21 +60,24 @@ let main () = begin
     input_line fin (*read up until newline*)
   in
 
+  (*debug printing*)
+  let debug_print_id (loc, string) = 
+    printf("DEBUG PRINTING ID: (%s %s )\n") loc string 
+  in
+
   (* create a decrementing list of numbers*)
   let rec range k = 
     if k <= 0 then []
     else k ::(range (k-1))
   in 
 
-
   (* 
   reads in a number first, then
   calls worker k times and 
     returns a list containing the outputs of worker
   *)
-  let read_list worker = 
+  let read_list worker =  
     let k = int_of_string(read()) in
-    printf "read_list of %d\n" k;
     let lst = range k in
     List.map(fun _ -> worker()) lst
   in
@@ -109,6 +120,8 @@ let main () = begin
       let fname = read_id() in
       let ftype = read_id() in
       let finit = read_exp() in
+      (*debug_print_id fname;
+      debug_print_id ftype;*)
       Attribute(fname, ftype, (Some finit))
     | "method" ->
       let mname = read_id() in
@@ -135,8 +148,11 @@ let main () = begin
 
   let ast = read_cool_program() in
   close_in fin;
+  (*
   printf "CL-AST de-serialized, %d classes\n" (List.length ast);
-
+  printf "printing...\n";
+  List.iter (fun ((_, cname),_,_)-> printf "%s\n" cname) ast; 
+  *)
   (*Check for class related errors*)
 
   let base_classes = ["Int" ; "String" ; "Bool" ; "IO" ; "Object"] in 
@@ -145,9 +161,40 @@ let main () = begin
   extract cname from list of cool_classes.
   *)
   let user_classes = List.map(fun ((_,cname),_,_) -> cname) ast in
+  let all_classes = base_classes @ user_classes in
+  let all_classes = List.sort compare all_classes in
+  (*THEME IN PA2 - make internal data structure to hold helper 
+information so you can do the checks more easily.*)
 
-  (*look for inheritance from int*)
-  (*look for inheritance from undeclared class*)
+  (*
+  loop through cool program for cool classes.
+  look for inheritance from int
+  look for inheritance from undeclared class
+  *)
+  List.iter (fun ((cloc,cname),inherits,features) ->
+    match inherits with
+    | None -> ()
+    | Some(iloc,iname) -> (*inherited type identifier*)
+      if iname = "Int" then begin
+        printf "ERROR: %s: Type-Check: inheriting from forbidden class %s\n" iloc iname;
+        exit 1
+      end;
+      (*check if iname is in all_classes*)
+      if not (List.mem iname all_classes) then begin
+        printf "ERROR: %s: Type-Check: inheriting from undefined class %s\n" iloc iname;
+        exit 1
+      end;
+   ) ast;
 
+   (* DONE WITH ERROR CHECKING *)
+
+   (* emit cl-type file*)
+   (*for pa2c, just do class map*)
+   let cmname = (Filename.chop_extension fname) ^ ".cl-type" in
+   let fout = open_out cmname in
+   fprintf fout "class_map\n";
+   fprintf fout "%d\n" (List.length all_classes);
+
+   close_out fout;
 end ;;
 main () ;;
