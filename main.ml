@@ -115,7 +115,7 @@ let main () = begin
     | "attribute_no_init" ->
       let fname = read_id() in
       let ftype = read_id() in
-      Attribute(fname, ftype, None)
+      Attribute(fname, ftype, None) (*call attribute constructor*)
     | "attribute_init" ->
       let fname = read_id() in
       let ftype = read_id() in
@@ -192,9 +192,62 @@ information so you can do the checks more easily.*)
    (*for pa2c, just do class map*)
    let cmname = (Filename.chop_extension fname) ^ ".cl-type" in
    let fout = open_out cmname in
+
+   let rec output_exp (eloc, ekind) =
+    fprintf fout "%s\n" eloc;
+    match ekind with
+    | Integer(ival) -> fprintf fout "integer\n%s\n" ival
+   in
+
    fprintf fout "class_map\n";
    fprintf fout "%d\n" (List.length all_classes);
 
+   List.iter(fun cname ->
+    (* name of class, # attrs, each attr that is a feature*)
+    fprintf fout "%s\n" cname;
+
+    (*extract attributes classes in the ast*)
+    let attributes =
+      try
+        let _,inherits,features = List.find (fun ((_,cname2),_,_) -> cname = cname2) ast in
+        List.filter (fun feature -> match feature with
+        | Attribute _ -> true
+        | Method _ -> false
+        ) features
+      (*
+      classes that are in all_classes but not user-specified
+      could be bool, int, object etc
+        *)
+      with Not_found -> 
+        []
+    in
+
+    (* print out number of attributes for the class *)
+    fprintf fout "%d\n" (List.length attributes);
+
+    (*
+      output
+      either no_initializer or initializer
+      attribute name
+      attribute type
+      initializer line number
+      initializer expression kind
+      intiailizer constant
+    *)(*only match against Attribute types*)
+    List.iter (fun attr -> match attr with
+    | Attribute((_,aname),(_,atype),None) ->
+      fprintf fout "no_initializer\n";
+      fprintf fout "%s\n" aname;
+      fprintf fout "%s\n" atype
+    | Attribute((_,aname),(_,atype),(Some init))->  
+      fprintf fout "initializer\n";
+      fprintf fout "%s\n" aname;
+      fprintf fout "%s\n" atype;
+      output_exp init
+    | Method _ -> failwith "method unexpected"
+    ) attributes;
+   ) all_classes ;
+        
    close_out fout;
 end ;;
 main () ;;
