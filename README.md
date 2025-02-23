@@ -1,5 +1,3 @@
-type checking cool files
-
 prints class map containing
 
 - class names
