@@ -1,6 +1,6 @@
 (* 
 current score:
-13/40
+15/40
 *)
 (*
 Some code stolen from westley weimer
@@ -303,10 +303,8 @@ information so you can do the checks more easily.*)
 
   check_class_redeclaration ast;
 
-
   (*
-    look for feature redelclaration of class 
-  loop thorugh classes in ast checking for duplicate features in a class 
+   features shenanigans
   *)
   List.iter (fun((cloc,cname),_,_) ->
     let features = collect_features parent_map ast cname in
@@ -314,11 +312,38 @@ information so you can do the checks more easily.*)
     let seen_attributes = Hashtbl.create (List.length features) in
     List.iter(fun(feature) -> (
     match feature with
-    | Method((mloc,mname),_,_,_) -> 
+    | Method((mloc,mname),formals,_,_) -> 
+      (*check for main method*)
+      if cname = "Main" then begin
+        let has_main = List.exists(fun m -> match m with
+          | Method((_,mname),_,_,_) -> mname = "main"
+          | _ -> false) features
+        in 
+        if not has_main then begin
+          printf "ERROR: 0: Type-Check: class Main method main not found!!\n";
+          exit 1
+        end;
+      end;
+      
+      (* 
+      check for redefining formals 
+      *)
+      
+      let seen_formals = Hashtbl.create (List.length formals) in
+      
+      List.iter (fun ((floc,fname),_) -> 
+        if Hashtbl.mem seen_formals fname then begin
+          printf "ERROR: %s: Type-Check: class %s has method %s with duplicate formal %s!\n" floc cname mname fname;
+          exit 1
+        end;
+        Hashtbl.add seen_formals fname true
+        ) formals;
+        
       if Hashtbl.mem seen_methods mname then begin
         printf "ERROR: %s: Type-Check: cannot redeclare Method %s in class %s!\n" mloc mname cname;
         exit 1
       end;
+      
       Hashtbl.add seen_methods mname true
     | Attribute((aloc,aname),_,_) -> 
       if Hashtbl.mem seen_attributes aname then begin
@@ -328,7 +353,7 @@ information so you can do the checks more easily.*)
       Hashtbl.add seen_attributes aname true
     )) features
   ) ast;
-    
+   
   
    (* DONE WITH ERROR CHECKING *)
 
