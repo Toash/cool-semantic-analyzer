@@ -12,3 +12,12 @@ class A inherits Main{
 	z:Int<-123;
 };
 
+
+class B {
+
+};
+
+class B {
+
+};
+

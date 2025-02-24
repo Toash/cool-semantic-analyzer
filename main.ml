@@ -1,3 +1,7 @@
+(* 
+current score:
+13/40
+*)
 (*
 Some code stolen from westley weimer
 https://www.youtube.com/watch?v=Wa9zMygcv_M&ab_channel=WestleyWeimer
@@ -60,11 +64,6 @@ let main () = begin
 
   let read () = 
     input_line fin (*read up until newline*)
-  in
-
-  (*debug printing*)
-  let debug_print_id (loc, string) = 
-    printf("DEBUG PRINTING ID: (%s %s )\n") loc string 
   in
 
   (* create a decrementing list of numbers*)
@@ -193,15 +192,23 @@ information so you can do the checks more easily.*)
     parent_map 
   in
   let detect_inheritance_cycles parent_map =
+    (*
+    visited works differently than path,
+    it ensures that we dont visit the same node.
+    
+    path ensures that we dont visit the same node in the inheritance tree.
+    *)
     let visited = Hashtbl.create (Hashtbl.length parent_map) in
     let rec dfs cname path =
       (* already encountered this class! (from path variable) *)
       if List.mem cname path then begin
-        printf "ERROR: cyclic inheritance, class %s already encountered!\n" cname;
+        (*crm- inheritance cycle always line 0.*)
+        printf "ERROR: 0: Type-Check: cyclic inheritance involving class %s and %s\n" cname (Hashtbl.find parent_map cname);
         exit 1
       end;
       if not (Hashtbl.mem visited cname) then begin 
         Hashtbl.add visited cname true;
+        (* see if there are any parent nodes to traverse to. *)
         match Hashtbl.find_opt parent_map cname with
         | Some parent -> dfs parent (cname :: path)
         | None -> ()
@@ -280,16 +287,18 @@ information so you can do the checks more easily.*)
       look for redeclaration of class
       since the class names are sorted, we can simply check if the next is equal to current.
   *)
-  let rec check_redeclaration class_list = match class_list with
-  | [] | [_] -> ()
-  | h1 :: h2 :: t ->
-    if h1=h2 then begin
-      printf "ERROR: cannot redeclare class %s!\n" h2;
+  let rec check_redeclaration ast = match ast with
+  | ((cloc,cname),_,_) :: (((cloc2,cname2),_,_) as h2) :: t ->
+    if cname=cname2 then begin
+      (* TODO: print identifer location *)
+      printf "ERROR: %s: Type-Check: cannot redeclare class %s!\n" cloc2 cname2;
       exit 1
     end;
-    check_redeclaration (h2::t) in
+    check_redeclaration (h2 :: t) 
+  | _ -> ()
+  in
 
-  check_redeclaration all_classes;
+  check_redeclaration ast;
 
    (* DONE WITH ERROR CHECKING *)
 
