@@ -1,23 +1,12 @@
 class Main {
 	x: Int<-420;
-	y:Object <-69;
+	x: Object<-1;
+	x(): Object {1};
+	x(): Object {1};
+		
+	test_method(test_formal1: Int, test_formal2: Object) : Object{
+		1};
 	main() : Object{
 		1337
 	};
 };
-
-
--- we should get x and y as well.
-class A inherits Main{
-	z:Int<-123;
-};
-
-
-class B {
-
-};
-
-class B {
-
-};
-
