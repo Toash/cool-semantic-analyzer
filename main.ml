@@ -168,6 +168,94 @@ let main () = begin
   (*THEME IN PA2 - make internal data structure to hold helper 
 information so you can do the checks more easily.*)
 
+
+  (*extract attributes classes in the ast*)
+  (* NEED TO CONSIDER ATTRIBUTES FROM BASE CLASSES 
+  hard part is considering inheritance
+  1. construct a mapping from child to parent
+    use toposort here to find the right order of traversal (or detect inheritance cycles)
+  2. recursively walk up mapping until get object
+  3. add in all of attributes that we find
+  4. while there look for attribute override problems.
+
+  we use toposort to find the right order to gather up attributes
+    need to do this to correctly consider shadowing.
+  *)
+
+  (* mapping from child to parent*)
+  let build_parent_map ast = 
+    let parent_map = Hashtbl.create (List.length ast) in
+    List.iter(fun ((_,cname), inherits, _) -> 
+      match inherits with
+      | None -> ()
+      | Some(_,pname)-> Hashtbl.add parent_map cname pname
+      )ast;
+    parent_map 
+  in
+  let detect_inheritance_cycles parent_map =
+    let visited = Hashtbl.create (Hashtbl.length parent_map) in
+    let rec dfs cname path =
+      (* already encountered this class! (from path variable) *)
+      if List.mem cname path then begin
+        printf "ERROR: cyclic inheritance, class %s already encountered!\n" cname;
+        exit 1
+      end;
+      if not (Hashtbl.mem visited cname) then begin 
+        Hashtbl.add visited cname true;
+        match Hashtbl.find_opt parent_map cname with
+        | Some parent -> dfs parent (cname :: path)
+        | None -> ()
+      end
+    in
+    Hashtbl.iter(fun cname _ -> dfs cname []) parent_map 
+  in
+  (* 
+  given a class name, collect all of its attributes (including from inherited classes 
+  does this by merging the current class and parent class attributes.
+    does this recursively. (keeps going up the inheritance tree)
+  *)
+  let rec collect_attributes parent_map ast cname =
+    (* get parent class name if there is one *)
+    let parent_attrs = match Hashtbl.find_opt parent_map cname with
+    | Some parent -> collect_attributes parent_map ast parent
+    | None -> [] (* base class, no parent*)
+    in  
+    let class_attrs = 
+      try
+        (* extract features from cname *)
+        let _,_,features = List.find(fun ((_,cname2),_,_) -> cname = cname2) ast in
+        (* extract only the attributes.*)
+        List.filter_map (fun feature ->
+          match feature with
+          (* could write the type constructor out explicitly*)
+          | Attribute _ as attr -> Some attr
+          | _ -> None
+        ) features
+      with Not_found -> []
+    in
+    (* 
+    mrege attributes
+    returns list of attributes, ensuring that child attributes override parents.
+    *)
+    let rec merge_attributes parent child = 
+      match parent with
+      | [] -> child (* parent has no attributes *)
+      | (Attribute((_,aname),_,_) as attr) :: rest ->
+          (* if the attribute exists in the child *)
+          if List.exists (fun (Attribute((_,aname2),_,_)) -> aname = aname2) child 
+          (* we already have the attribute in child *)
+          then merge_attributes rest child 
+          (* inherit the attribute*)
+          else attr :: merge_attributes rest child
+      | (Method(_,_,_,_))::_ -> failwith "method unexpected!\n"
+    in
+    merge_attributes parent_attrs class_attrs 
+  in 
+  let parent_map = build_parent_map ast in
+  detect_inheritance_cycles parent_map; 
+  
+
+
   (*
   look for inheritance from int
   look for inheritance from undeclared class
@@ -186,6 +274,7 @@ information so you can do the checks more easily.*)
         exit 1
       end;
    ) ast;
+
 
   (*
       look for redeclaration of class
@@ -221,20 +310,8 @@ information so you can do the checks more easily.*)
    List.iter(fun cname ->
     (* name of class, # attrs, each attr that is a feature*)
     fprintf fout "%s\n" cname;
-
-    (*extract attributes classes in the ast*)
-   (* NEED TO CONSIDER ATTRIBUTES FROM BASE CLASSES 
-   hard part is considering inheritance
-    1. construct a mapping from child to parent
-      use toposort here to find the right order of traversal (or detect inheritance cycles)
-    2. recursively walk up mapping until get object
-    3. add in all of attributes that we find
-    4. while there look for attribute override problems.
-
-    we use toposort to find the right order to gather up attributes
-      need to do this to correctly consider shadowing.
-   *)
-    let attributes =
+(*
+   let attributes =
       try
         let _,inherits,features = List.find (fun ((_,cname2),_,_) -> cname = cname2) ast in
         List.filter (fun feature -> match feature with
@@ -248,6 +325,8 @@ information so you can do the checks more easily.*)
       with Not_found -> 
         []
     in
+*)
+    let attributes = collect_attributes parent_map ast cname in 
 
     (* print out number of attributes for the class *)
     fprintf fout "%d\n" (List.length attributes);

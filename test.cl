@@ -7,11 +7,8 @@ class Main {
 };
 
 
-class A{
-
-};
-
-class A{
-
+-- we should get x and y as well.
+class A inherits Main{
+	z:Int<-123;
 };
 
