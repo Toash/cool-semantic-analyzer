@@ -1,6 +1,10 @@
 (* 
 current score:
-15/40
+17/40
+*)
+(*
+Basically, you’ll look at classes, methods and attibutes (but not method bodies).
+
 *)
 (*
 Some code stolen from westley weimer
@@ -231,13 +235,7 @@ information so you can do the checks more easily.*)
       try
         (* extract features from cname *)
         let _,_,features = List.find(fun ((_,cname2),_,_) -> cname = cname2) ast in
-        (* extract only the attributes.*)
-        List.filter_map (fun feature ->
-          match feature with
-          (* could write the type constructor out explicitly*)
-          | Attribute _ as attr -> Some attr
-          | Method _ as meth -> Some meth
-        ) features
+        features
       with Not_found -> []
     in
     (* 
@@ -249,15 +247,49 @@ information so you can do the checks more easily.*)
       | [] -> child (* parent has no attributes *)
       | (Attribute((_,aname),_,_) as attr) :: rest ->
           (* if the attribute exists in the child *)
-          if List.exists (fun (Attribute((_,aname2),_,_)) -> aname = aname2) child 
-          (* we already have the attribute in child *)
-          then merge_features rest child 
+          if List.exists (fun feature ->
+            match feature with
+            | Attribute((_, aname2), _, _) -> aname = aname2
+            | Method _ -> false  
+          ) child then begin
+            merge_features rest child 
+          end
           (* inherit the attribute*)
-          else attr :: merge_features rest child
-      | (Method((_,mname),_,_,_) as meth) :: rest ->
-          if List.exists (fun (Method((_,mname2),_,_,_)) -> mname = mname2) child 
-          then merge_features rest child 
-          else meth :: merge_features rest child 
+          else begin 
+            attr :: merge_features rest child
+          end
+      | (Method((_,mname),formals,(_,mtype),_) as meth) :: rest ->
+          (* if method exists in child (user explicitly define method in child) *)
+          if List.exists (fun (Method((_,mname2),_,(_,mtype2),_)) -> mname = mname2) child then begin
+            
+            List.iter(fun (Method((mloc2,mname2),formals2,(_,mtype2),_)) -> 
+              if mname = mname2 then begin 
+                (* check if parameters are the same *) 
+                if List.length formals <> List.length formals2 then begin
+                  printf "ERROR: %s: Type-Check: class %s redefines method %s with different number of parameters!\n" mloc2 cname mname2;
+                  exit 1
+                end;
+                (* 
+                check if parameters are same type
+                COOL doenst allow out of order formal for overriding. thanks COOL! 
+                *)
+                List.iter2 (fun ((_,fname1),(_,ftype1)) ((floc2,fname2),(_,ftype2)) ->
+                  if ftype1 <> ftype2 then begin
+                    printf "ERROR: %s: Type-Check: class %s redefines method %s and changes type of formal!%s\n" floc2 cname mname2 fname2;
+                    exit 1
+                  end
+                ) formals formals2;
+                (* check if return type for overriden methods are the same *)
+                if not (mtype = mtype2) then begin
+                  printf "ERROR: %s: Type-Check: class %s redefines method %s but return types arent the same (%s and %s)\n" mloc2 cname mname2 mtype mtype2;
+                  exit 1
+                end;
+              end
+              ) child;
+            merge_features rest child 
+          end
+          else 
+            meth :: merge_features rest child 
     in
     merge_features parent_features class_features 
   in 
@@ -339,6 +371,11 @@ information so you can do the checks more easily.*)
         Hashtbl.add seen_formals fname true
         ) formals;
         
+
+
+      (*
+
+      *)
       if Hashtbl.mem seen_methods mname then begin
         printf "ERROR: %s: Type-Check: cannot redeclare Method %s in class %s!\n" mloc mname cname;
         exit 1
