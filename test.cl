@@ -1,6 +1,7 @@
 class Main {
-	x: Int<-420;
-	y:String<-"hello";
+	x:Bool<-true;
+	y:Bool<-false;
+	z:Int<-1;
 	main(): Object{
 		1	
 	};

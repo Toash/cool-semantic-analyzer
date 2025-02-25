@@ -54,6 +54,7 @@ and exp = loc * exp_kind
 and exp_kind = (* represents the type and values of expressions*)
   | Integer of string (*really an int*)
   | String of string
+  | Bool of string (*true or false*)
 
 let main () = begin 
 
@@ -145,6 +146,10 @@ let main () = begin
     | "string" ->
       let sval=read() in
       String(sval)
+    | "false" ->
+      Bool("false")
+    | "true" ->
+      Bool("true")
     | x -> (*do all of other expressions*)
       failwith ("expression kind unhandled: " ^ x)
     in 
@@ -408,6 +413,7 @@ information so you can do the checks more easily.*)
     match ekind with
     | Integer(ival) -> fprintf fout "integer\n%s\n" ival
     | String(sval) -> fprintf fout "string\n%s\n" sval
+    | Bool(bval) -> fprintf fout "%s\n" bval
    in
 
    fprintf fout "class_map\n";
