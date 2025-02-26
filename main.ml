@@ -58,6 +58,7 @@ and exp_kind = (* represents the type and values of expressions*)
   | Bool of string (*true or false*)
   | New of cool_type 
   | Block of exp list (* last expression is the blocks value *) 
+  | Assign of id * exp
 let main () = begin 
 
   (* de serialize cl-ast file*)
@@ -160,6 +161,10 @@ let main () = begin
       Identifier(ident)
     | "block" ->
       Block(read_list read_exp)
+    | "assign" ->
+      let id = read_id() in
+      let exp = read_exp() in
+      Assign(id,exp)
     | x -> (*do all of other expressions*)
       failwith ("expression kind unhandled: " ^ x)
     in 
