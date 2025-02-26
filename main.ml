@@ -399,16 +399,22 @@ information so you can do the checks more easily.*)
       let seen_formals = Hashtbl.create (List.length formals) in
       
       List.iter (fun ((floc,fname),(_,ftype)) -> 
-        (*todo: check if formal type has been declared previously*)
+        
         if Hashtbl.mem seen_formals fname then begin
           printf "ERROR: %s: Type-Check: class %s has method %s with duplicate formal %s!\n" floc cname mname fname;
           exit 1
         end;
-        Hashtbl.add seen_formals fname true
+        Hashtbl.add seen_formals fname true;
+
+        (* check if formal has type that exists *)
+        if not (List.mem ftype all_classes) then begin
+          printf "ERROR: %s: Type-Check: class %s has method %s with formal parameter of unknown type %s\n" floc cname mname ftype;
+          exit 1
+        end
         ) formals;
 
       (*
-
+        check for duplicate method
       *)
       if Hashtbl.mem seen_methods mname then begin
         printf "ERROR: %s: Type-Check: cannot redeclare Method %s in class %s!\n" mloc mname cname;
