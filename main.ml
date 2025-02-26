@@ -1,6 +1,6 @@
 (* 
 current score:
-17/40
+18/40
 *)
 (*
 Basically, you’ll look at classes, methods and attibutes (but not method bodies).
@@ -52,9 +52,11 @@ and formal = id * cool_type (*formals are the parameters listed in the method si
 
 and exp = loc * exp_kind
 and exp_kind = (* represents the type and values of expressions*)
+  | Identifier of id
   | Integer of string (*really an int*)
   | String of string
   | Bool of string (*true or false*)
+  | New of cool_type 
 
 let main () = begin 
 
@@ -109,7 +111,7 @@ let main () = begin
     | "inherits" ->
       let super = read_id () in
       Some(super)
-    | x -> failwith ("cannot happen:" ^ x)
+    | x -> failwith ("error reading class:" ^ x)
     in
     let features = read_list read_feature in
     (cname, inherits, features)
@@ -132,7 +134,7 @@ let main () = begin
       let mtype = read_id() in
       let mbody = read_exp() in 
       Method(mname,formals,mtype,mbody)
-    | x -> failwith ("cannot happen:" ^ x)
+    | x -> failwith ("error reading feature:" ^ x)
   and read_formal () =
     let fname = read_id () in
     let ftype = read_id() in
@@ -150,6 +152,12 @@ let main () = begin
       Bool("false")
     | "true" ->
       Bool("true")
+    | "new" ->
+      let ntype = read_id() in (*the class name*)
+      New(ntype) 
+    | "identifier" -> 
+      let ident = read_id () in
+      Identifier(ident)
     | x -> (*do all of other expressions*)
       failwith ("expression kind unhandled: " ^ x)
     in 
@@ -173,6 +181,8 @@ let main () = begin
   let user_classes = List.map(fun ((_,cname),_,_) -> cname) ast in
   let all_classes = base_classes @ user_classes in
   let all_classes = List.sort compare all_classes in
+
+
   (*THEME IN PA2 - make internal data structure to hold helper 
 information so you can do the checks more easily.*)
 
@@ -269,31 +279,40 @@ information so you can do the checks more easily.*)
           end
       | (Method((_,mname),formals,(_,mtype),_) as meth) :: rest ->
           (* if method exists in child (user explicitly define method in child) *)
-          if List.exists (fun (Method((_,mname2),_,(_,mtype2),_)) -> mname = mname2) child then begin
+          if List.exists (fun (e) -> 
+            match e with
+            | Method((_,mname2),_,(_,mtype2),_) ->
+             mname = mname2
+            | _ -> false
+            ) child then begin
             
-            List.iter(fun (Method((mloc2,mname2),formals2,(_,mtype2),_)) -> 
-              if mname = mname2 then begin 
-                (* check if parameters are the same *) 
-                if List.length formals <> List.length formals2 then begin
-                  printf "ERROR: %s: Type-Check: class %s redefines method %s with different number of parameters!\n" mloc2 cname mname2;
-                  exit 1
-                end;
-                (* 
-                check if parameters are same type
-                COOL doenst allow out of order formal for overriding. thanks COOL! 
-                *)
-                List.iter2 (fun ((_,fname1),(_,ftype1)) ((floc2,fname2),(_,ftype2)) ->
-                  if ftype1 <> ftype2 then begin
-                    printf "ERROR: %s: Type-Check: class %s redefines method %s and changes type of formal!%s\n" floc2 cname mname2 fname2;
+            List.iter(fun (e) -> 
+              match e with 
+              | Method((mloc2,mname2),formals2,(_,mtype2),_) -> (
+                if mname = mname2 then begin 
+                  (* check if parameters are the same *) 
+                  if List.length formals <> List.length formals2 then begin
+                    printf "ERROR: %s: Type-Check: class %s redefines method %s with different number of parameters!\n" mloc2 cname mname2;
                     exit 1
-                  end
-                ) formals formals2;
-                (* check if return type for overriden methods are the same *)
-                if not (mtype = mtype2) then begin
-                  printf "ERROR: %s: Type-Check: class %s redefines method %s but return types arent the same (%s and %s)\n" mloc2 cname mname2 mtype mtype2;
-                  exit 1
-                end;
-              end
+                  end;
+                  (* 
+                  check if parameters are same type
+                  COOL doenst allow out of order formal for overriding. thanks COOL! 
+                  *)
+                  List.iter2 (fun ((_,fname1),(_,ftype1)) ((floc2,fname2),(_,ftype2)) ->
+                    if ftype1 <> ftype2 then begin
+                      printf "ERROR: %s: Type-Check: class %s redefines method %s and changes type of formal!%s\n" floc2 cname mname2 fname2;
+                      exit 1
+                    end
+                  ) formals formals2;
+                  (* check if return type for overriden methods are the same *)
+                  if not (mtype = mtype2) then begin
+                    printf "ERROR: %s: Type-Check: class %s redefines method %s but return types arent the same (%s and %s)\n" mloc2 cname mname2 mtype mtype2;
+                    exit 1
+                  end;
+                end
+              )
+              | _ -> ()
               ) child;
             merge_features rest child 
           end
@@ -367,20 +386,19 @@ information so you can do the checks more easily.*)
       end;
       
       (* 
-      check for redefining formals 
+      check formals
       *)
       
       let seen_formals = Hashtbl.create (List.length formals) in
       
-      List.iter (fun ((floc,fname),_) -> 
+      List.iter (fun ((floc,fname),(_,ftype)) -> 
+        (*todo: check if formal type has been declared previously*)
         if Hashtbl.mem seen_formals fname then begin
           printf "ERROR: %s: Type-Check: class %s has method %s with duplicate formal %s!\n" floc cname mname fname;
           exit 1
         end;
         Hashtbl.add seen_formals fname true
         ) formals;
-        
-
 
       (*
 
@@ -391,12 +409,48 @@ information so you can do the checks more easily.*)
       end;
       
       Hashtbl.add seen_methods mname true
-    | Attribute((aloc,aname),_,_) -> 
+    | Attribute((aloc,aname),(tloc,tname),None) -> 
+      (*Check for nonexistent type for attribute*)
+      if not ( List.mem tname all_classes )then begin
+        printf "ERROR: %s: Type-Check: class %s has attribute %s with unknown type %s\n" tloc cname aname tname;
+        exit 1
+      end;
+
+      (* Check for mismatched types for attributes*)
       if Hashtbl.mem seen_attributes aname then begin
         printf "ERROR: %s: Type-Check: cannot redeclare Attribute %s in class %s!\n" aloc aname cname;
         exit 1
       end;
       Hashtbl.add seen_attributes aname true
+      
+     | Attribute((aloc,aname),(tloc,tname),Some(exp)) -> 
+      (* DRY oops*)
+            (*Check for nonexistent type for attribute*)
+      if not ( List.mem tname all_classes )then begin
+        printf "ERROR: %s: Type-Check: class %s has attribute %s with unknown type %s\n" tloc cname aname tname;
+        exit 1
+      end;
+
+      (* Check for mismatched types for attributes*)
+      if Hashtbl.mem seen_attributes aname then begin
+        printf "ERROR: %s: Type-Check: cannot redeclare Attribute %s in class %s!\n" aloc aname cname;
+        exit 1
+      end;
+      Hashtbl.add seen_attributes aname true;
+      
+      (*check if expression type matches attribute type*)
+        (* should we generalize to user defined classes? i dunno*)
+      let check_expression_type loc expression_type attribute_type = 
+        if attribute_type <> expression_type && attribute_type <> "Object" then begin
+          printf "ERROR: %s: Type-Check: %s does not conform to %s in initialized attribute\n" loc expression_type attribute_type;
+          exit 1
+        end
+      in
+      match exp with
+      | (_, Integer(_)) -> check_expression_type tloc "Int" tname
+      | (_, String(_)) -> check_expression_type tloc "String" tname
+      | (_, Bool(_)) -> check_expression_type tloc "Bool" tname
+      | _ -> ()
     )) features
   ) ast;
    
@@ -409,11 +463,14 @@ information so you can do the checks more easily.*)
    let fout = open_out cmname in
 
    let rec output_exp (eloc, ekind) =
+    (* print expressions with line number first*)
     fprintf fout "%s\n" eloc;
     match ekind with
     | Integer(ival) -> fprintf fout "integer\n%s\n" ival
     | String(sval) -> fprintf fout "string\n%s\n" sval
     | Bool(bval) -> fprintf fout "%s\n" bval
+    | New((nloc,nval)) -> fprintf fout "new\n%s\n%s\n" nloc nval
+    | _ -> ()
    in
 
    fprintf fout "class_map\n";
