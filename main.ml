@@ -1,6 +1,6 @@
 (* 
 current score:
-18/40
+20/40
 *)
 (*
 Basically, you’ll look at classes, methods and attibutes (but not method bodies).
@@ -57,7 +57,7 @@ and exp_kind = (* represents the type and values of expressions*)
   | String of string
   | Bool of string (*true or false*)
   | New of cool_type 
-
+  | Block of exp list (* last expression is the blocks value *) 
 let main () = begin 
 
   (* de serialize cl-ast file*)
@@ -158,6 +158,8 @@ let main () = begin
     | "identifier" -> 
       let ident = read_id () in
       Identifier(ident)
+    | "block" ->
+      Block(read_list read_exp)
     | x -> (*do all of other expressions*)
       failwith ("expression kind unhandled: " ^ x)
     in 
