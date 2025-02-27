@@ -482,6 +482,17 @@ information so you can do the checks more easily.*)
 
   check_class_redeclaration ast;
 
+
+  (*
+    Ensure that we dont redefine IO 
+  *)
+  List.iter (fun ((cloc,cname),_,_)-> 
+    if cname = "IO" then begin
+      printf "ERROR: %s: Type-Check: class IO redefined\n" cloc;
+      exit 1
+    end
+  ) ast;
+
   (*
    features shenanigans
   *)
