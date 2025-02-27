@@ -457,6 +457,13 @@ information so you can do the checks more easily.*)
         printf "ERROR: %s: Type-Check: inheriting from forbidden class %s\n" iloc iname;
         exit 1
       end;
+      if iname = "String" then begin
+        printf "ERROR: %s: Type-Check: inheriting from forbidden class %s\n" iloc iname;
+        exit 1
+      end;
+
+
+
       (*check if iname is in all_classes*)
       if not (List.mem iname all_classes) then begin
         printf "ERROR: %s: Type-Check: inheriting from undefined class %s\n" iloc iname;
@@ -484,13 +491,18 @@ information so you can do the checks more easily.*)
 
 
   (*
-    Ensure that we dont redefine IO 
+    Ensure that we dont redefine IO or String
   *)
   List.iter (fun ((cloc,cname),_,_)-> 
     if cname = "IO" then begin
       printf "ERROR: %s: Type-Check: class IO redefined\n" cloc;
       exit 1
+    end;
+    if cname = "String" then begin
+      printf "ERROR: %s: Type-Check: class String redefined\n" cloc;
+      exit 1
     end
+     
   ) ast;
 
   (*
