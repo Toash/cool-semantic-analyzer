@@ -138,7 +138,9 @@ let main () = begin
     let features = read_list read_feature in
     (cname, inherits, features)
   and read_feature () = 
-    match read() with
+    let feature_type = read() in
+    (*printf "Debug %s \n" feature_type;*)
+    match feature_type with
     | "attribute_no_init" ->
       let fname = read_id() in
       let ftype = read_id() in
@@ -344,6 +346,14 @@ information so you can do the checks more easily.*)
     in
     Hashtbl.iter(fun cname _ -> dfs cname []) parent_map 
   in
+  let io_methods = [
+  Method(("", "out_string"), [(("", "x"), ("", "String"))], ("", "SELF_TYPE"), ("",Identifier("", "SELF_TYPE")));
+  Method(("", "out_int"), [(("", "x"), ("", "Int"))], ("", "SELF_TYPE"), ("",Identifier("", "SELF_TYPE")));
+  Method(("", "in_string"), [], ("", "String"), ("",Identifier("", "String")));
+  Method(("", "in_int"), [], ("", "Int"), ("",Identifier("", "Int")));
+  ] 
+  in
+
   (* 
   given a class name, collect all of its features(including from inherited classes 
   does this by merging the current class and parent class features.
@@ -356,6 +366,10 @@ information so you can do the checks more easily.*)
     | None -> [] (* base class, no parent*)
     in  
     let class_features = 
+      if cname = "IO" then begin
+        io_methods
+      end
+      else
       try
         (* extract features from cname *)
         let _,_,features = List.find(fun ((_,cname2),_,_) -> cname = cname2) ast in
