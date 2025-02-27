@@ -1,6 +1,6 @@
 (* 
 current score:
-26/40
+27/40
 *)
 (*
 Basically, you’ll look at classes, methods and attibutes (but not method bodies).
@@ -10,24 +10,7 @@ Basically, you’ll look at classes, methods and attibutes (but not method bodie
 Some code stolen from westley weimer
 https://www.youtube.com/watch?v=Wa9zMygcv_M&ab_channel=WestleyWeimer
 *)
-(*Sementic analyzer checkpoint*)
 
-
-(*
-WE ARE DECLARING RECURSIVE DATA STRUCTURES FOR ENCODING COOL AST
-
-When declaring types, the * creates a tuple
-| indicates different forms for variant types.
-ie a feature can be a Method or an Attribute
-
-The and keyword allows you to reference other types in a type definitoin
-  ie using other types to define a type
-
-Declaring types allows us to define the valid types that methods can return
-ie a method will return a feature, which can either be a Method or Attribute.
-
-They are also self documenting.
-*)
 
 open Printf
 
@@ -109,24 +92,15 @@ let main () = begin
     List.map(fun _ -> worker()) lst
   in
 
-  (*
-  many mutually recursive procedures to read in cl-ast file
-  we use and to define mutual functions - ie they can reference eachother
-  otherwise we could use let ... in .... to define functions beforehand.
-  *)
   let rec read_cool_program() = 
     read_list read_cool_class
 
-  (*
-  reads a locatoin and name
-  then returns the tuple
-  *)
-  and read_id() =  (*IDENTIFER*)
+  and read_id() =  
     let loc = read() in
     let name = read() in
     (loc,name)
   
-  and read_cool_class () = (*CLASS*)
+  and read_cool_class () =
     let cname = read_id () in 
     let inherits = match read() with
     | "no_inherits" -> None
@@ -139,18 +113,15 @@ let main () = begin
     (cname, inherits, features)
   and read_feature () = 
     let feature_type = read() in
-    (*printf "Debug %s \n" feature_type;*)
     match feature_type with
     | "attribute_no_init" ->
       let fname = read_id() in
       let ftype = read_id() in
-      Attribute(fname, ftype, None) (*call attribute constructor*)
+      Attribute(fname, ftype, None) 
     | "attribute_init" ->
       let fname = read_id() in
       let ftype = read_id() in
       let finit = read_exp() in
-      (*debug_print_id fname;
-      debug_print_id ftype;*)
       Attribute(fname, ftype, (Some finit))
     | "method" ->
       let mname = read_id() in
@@ -281,18 +252,9 @@ let main () = begin
 
   let ast = read_cool_program() in
   close_in fin;
-  (*
-  printf "CL-AST de-serialized, %d classes\n" (List.length ast);
-  printf "printing...\n";
-  List.iter (fun ((_, cname),_,_)-> printf "%s\n" cname) ast; 
-  *)
   (*Check for class related errors*)
 
   let base_classes = ["Int" ; "String" ; "Bool" ; "IO" ; "Object"] in 
-  (*
-  the ast is a cool program, which is a list of cool classes.
-  extract cname from list of cool_classes.
-  *)
   let user_classes = List.map(fun ((_,cname),_,_) -> cname) ast in
   let all_classes = base_classes @ user_classes in
   let all_classes = List.sort compare all_classes in
@@ -445,12 +407,27 @@ information so you can do the checks more easily.*)
   let parent_map = build_parent_map ast in
   detect_inheritance_cycles parent_map; 
   
-  (*
-  look for inheritance from int
-  look for inheritance from undeclared class
-  *)
+ (*
+    loop through ast to check for class related errors
+ *)
   List.iter (fun ((cloc,cname),inherits,features) ->
-    match inherits with
+    (*
+      Ensure that we dont redefine IO or String
+    *)
+      if cname = "IO" then begin
+        printf "ERROR: %s: Type-Check: class IO redefined\n" cloc;
+        exit 1
+      end;
+      if cname = "String" then begin
+        printf "ERROR: %s: Type-Check: class String redefined\n" cloc;
+        exit 1
+      end;
+
+
+    (*
+      Typechecking inheritance
+    *)
+      match inherits with
     | None -> ()
     | Some(iloc,iname) -> (*inherited type identifier*)
       if iname = "Int" then begin
@@ -461,7 +438,6 @@ information so you can do the checks more easily.*)
         printf "ERROR: %s: Type-Check: inheriting from forbidden class %s\n" iloc iname;
         exit 1
       end;
-
 
 
       (*check if iname is in all_classes*)
@@ -486,27 +462,16 @@ information so you can do the checks more easily.*)
     check_class_redeclaration (h2 :: t) 
   | _ -> ()
   in
-
   check_class_redeclaration ast;
 
 
-  (*
-    Ensure that we dont redefine IO or String
-  *)
-  List.iter (fun ((cloc,cname),_,_)-> 
-    if cname = "IO" then begin
-      printf "ERROR: %s: Type-Check: class IO redefined\n" cloc;
-      exit 1
-    end;
-    if cname = "String" then begin
-      printf "ERROR: %s: Type-Check: class String redefined\n" cloc;
-      exit 1
-    end
-     
-  ) ast;
+
+
+
+
 
   (*
-   features shenanigans
+    Typechecking methods
   *)
   List.iter (fun((cloc,cname),_,_) ->
     let features = collect_features parent_map ast cname in
@@ -612,7 +577,6 @@ information so you can do the checks more easily.*)
    (* DONE WITH ERROR CHECKING *)
 
    (* emit cl-type file*)
-   (*for pa2c, just do class map*)
    let cmname = (Filename.chop_extension fname) ^ ".cl-type" in
    let fout = open_out cmname in
 
