@@ -1,6 +1,6 @@
 (* 
 current score:
-22/40
+26/40
 *)
 (*
 Basically, you’ll look at classes, methods and attibutes (but not method bodies).
@@ -579,15 +579,97 @@ information so you can do the checks more easily.*)
    let cmname = (Filename.chop_extension fname) ^ ".cl-type" in
    let fout = open_out cmname in
 
+   
    let rec output_exp (eloc, ekind) =
-    (* print expressions with line number first*)
+    (* print expressions with line number first *)
     fprintf fout "%s\n" eloc;
     match ekind with
-    | Integer(ival) -> fprintf fout "integer\n%s\n" ival
-    | String(sval) -> fprintf fout "string\n%s\n" sval
-    | Bool(bval) -> fprintf fout "%s\n" bval
-    | New((nloc,nval)) -> fprintf fout "new\n%s\n%s\n" nloc nval
-    | _ -> ()
+    | Assign((id_loc, id_name), exp) ->
+        fprintf fout "assign\n%s\n%s\n" id_loc id_name;
+        output_exp exp
+    | Dynamic_Dispatch(exp, (id_loc, id_name), exp_list) ->
+        fprintf fout "dynamic_dispatch\n%s\n%s\n" id_loc id_name;
+        output_exp exp;
+        List.iter output_exp exp_list
+    | Static_Dispatch(exp, (t_loc, t_name), (m_loc, m_name), exp_list) ->
+        fprintf fout "static_dispatch\n%s\n%s\n%s\n%s\n" t_loc t_name m_loc m_name;
+        output_exp exp;
+        List.iter output_exp exp_list
+    | Self_Dispatch((id_loc, id_name), exp_list) ->
+        fprintf fout "self_dispatch\n%s\n%s\n" id_loc id_name;
+        List.iter output_exp exp_list
+    | If(exp1, exp2, exp3) ->
+        fprintf fout "if\n";
+        output_exp exp1;
+        output_exp exp2;
+        output_exp exp3
+    | While(exp1, exp2) ->
+        fprintf fout "while\n";
+        output_exp exp1;
+        output_exp exp2
+    | Block(exp_list) ->
+        fprintf fout "block\n";
+        List.iter output_exp exp_list
+    | New((nloc, nval)) ->
+        fprintf fout "new\n%s\n%s\n" nloc nval
+    | IsVoid(e) ->
+        fprintf fout "isvoid\n";
+        output_exp e
+    | Plus(exp1, exp2) ->
+        fprintf fout "plus\n";
+        output_exp exp1;
+        output_exp exp2
+    | Minus(exp1, exp2) ->
+        fprintf fout "minus\n";
+        output_exp exp1;
+        output_exp exp2
+    | Times(exp1, exp2) ->
+        fprintf fout "times\n";
+        output_exp exp1;
+        output_exp exp2
+    | Divide(exp1, exp2) ->
+        fprintf fout "divide\n";
+        output_exp exp1;
+        output_exp exp2
+    | LessThan(exp1, exp2) ->
+        fprintf fout "lt\n";
+        output_exp exp1;
+        output_exp exp2
+    | LessThanEqual(exp1, exp2) ->
+        fprintf fout "le\n";
+        output_exp exp1;
+        output_exp exp2
+    | Equal(exp1, exp2) ->
+        fprintf fout "eq\n";
+        output_exp exp1;
+        output_exp exp2
+    | Not(exp) ->
+        fprintf fout "not\n";
+        output_exp exp
+    | Negate(exp) ->
+        fprintf fout "negate\n";
+        output_exp exp
+    | Integer(ival) ->
+        fprintf fout "integer\n%s\n" ival
+    | String(sval) ->
+        fprintf fout "string\n%s\n" sval
+    | Identifier((id_loc, id_name)) ->
+        fprintf fout "identifier\n%s\n%s\n" id_loc id_name
+    | Bool(bval) ->
+        fprintf fout "bool\n%s\n" bval
+    | Let(_, bindings) ->
+        fprintf fout "let\n";
+        List.iter (fun ((id_loc, id_name), (type_loc, type_name), exp_opt) ->
+          fprintf fout "%s\n%s\n%s\n%s\n" id_loc id_name type_loc type_name;
+          (match exp_opt with 
+          | Some exp -> output_exp exp 
+          | None -> ())) bindings
+    | Case(_, exp, cases) ->
+        fprintf fout "case\n";
+        output_exp exp;
+        List.iter (fun ((id_loc, id_name), (type_loc, type_name), exp) ->
+          fprintf fout "%s\n%s\n%s\n%s\n" id_loc id_name type_loc type_name;
+          output_exp exp) cases
    in
 
    fprintf fout "class_map\n";
@@ -599,8 +681,8 @@ information so you can do the checks more easily.*)
     let features = collect_features parent_map ast cname in 
 
     (* print out number of features for the class *)
-    fprintf fout "%d\n" (List.fold_left (fun acc e -> 
-      match e with 
+    fprintf fout "%d\n" (List.fold_left (fun acc element -> 
+      match element with 
       | Attribute _->
         acc+1
       | _ -> acc+0

@@ -1,9 +1,6 @@
 class Main {
-	x:Int;
+	x:Bool<-1=1;
 	main() :Object { 
-		let x:Int <- 1, lmao:Int<-420 in 
-		let y:Int <- 5 in
-		let z:Int <- 4 in
 		1
 	};	
 };
