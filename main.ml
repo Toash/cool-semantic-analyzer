@@ -60,7 +60,7 @@ and exp_kind = (* represents the type and values of expressions*)
   | String of string
   | Identifier of id
   | Bool of string (*true or false*)
-  | Let of loc * binding list
+  | Let of binding list * exp (*id ends up being the count *)
   | Case of loc * exp * case_element list
 
 let main () = begin 
@@ -238,8 +238,9 @@ let main () = begin
     | "true" ->
       Bool("true")
     | "let" ->
-      let binding_list = read_list read_binding in
-      Let(eloc,binding_list)
+      let binding_list = read_list(read_binding) in
+      let body = read_exp() in 
+      Let(binding_list,body)
     | "case" ->
       let case = read_exp() in
       let case_elements = read_list(read_case_element) in
@@ -658,13 +659,20 @@ information so you can do the checks more easily.*)
         fprintf fout "identifier\n%s\n%s\n" id_loc id_name
     | Bool(bval) ->
         fprintf fout "bool\n%s\n" bval
-    | Let(_, bindings) ->
+    | Let(bindings,body) ->
         fprintf fout "let\n";
+        fprintf fout "%s\n" (string_of_int (List.length bindings));
         List.iter (fun ((id_loc, id_name), (type_loc, type_name), exp_opt) ->
+          (
+           match exp_opt with
+           | Some exp ->  fprintf fout "let_binding_init\n"
+           | None -> fprintf fout "let_binding_no_init\n"
+          );
           fprintf fout "%s\n%s\n%s\n%s\n" id_loc id_name type_loc type_name;
           (match exp_opt with 
           | Some exp -> output_exp exp 
-          | None -> ())) bindings
+          | None -> ())) bindings;
+          output_exp body
     | Case(_, exp, cases) ->
         fprintf fout "case\n";
         output_exp exp;
@@ -703,6 +711,7 @@ information so you can do the checks more easily.*)
     ) features;
    ) all_classes ;
         
+
    close_out fout;
 end ;;
 main () ;;
