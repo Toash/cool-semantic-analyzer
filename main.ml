@@ -1,6 +1,6 @@
 (* 
 current score:
-20/40
+22/40
 *)
 (*
 Basically, you’ll look at classes, methods and attibutes (but not method bodies).
@@ -50,15 +50,36 @@ and feature =
 
 and formal = id * cool_type (*formals are the parameters listed in the method signature*)
 
+and binding = id * cool_type * (exp option) (* let initialize or no intialize*)
+and case_element = id * cool_type * exp 
+
 and exp = loc * exp_kind
 and exp_kind = (* represents the type and values of expressions*)
-  | Identifier of id
+  | Assign of id * exp
+  | Dynamic_Dispatch of exp * id * exp list
+  | Static_Dispatch of exp * id * id * exp list
+  | Self_Dispatch of id * exp list
+  | If of exp * exp * exp (* if then else*)
+  | While of exp * exp
+  | Block of exp list (* last expression is the blocks value *) 
+  | New of cool_type 
+  | IsVoid of exp
+  | Plus of exp * exp
+  | Minus of exp * exp 
+  | Times of exp * exp
+  | Divide of exp * exp
+  | LessThan of exp * exp
+  | LessThanEqual of exp * exp
+  | Equal of exp * exp
+  | Not of exp 
+  | Negate of exp
   | Integer of string (*really an int*)
   | String of string
+  | Identifier of id
   | Bool of string (*true or false*)
-  | New of cool_type 
-  | Block of exp list (* last expression is the blocks value *) 
-  | Assign of id * exp
+  | Let of loc * binding list
+  | Case of loc * exp * case_element list
+
 let main () = begin 
 
   (* de serialize cl-ast file*)
@@ -140,31 +161,116 @@ let main () = begin
     let fname = read_id () in
     let ftype = read_id() in
     (fname, ftype)
+  and read_binding () =
+    match read() with
+    | "let_binding_no_init" ->
+      let bname = read_id() in
+      let btype = read_id() in
+      (bname,btype,None)
+    | "let_binding_init" ->
+      let bname = read_id() in
+      let btype = read_id() in
+      let bval = read_exp() in
+      (bname,btype,Some(bval))
+    | x -> failwith("error reading let binding:" ^x)
+  and read_case_element() = 
+    let cevar = read_id() in
+    let cetype = read_id() in
+    let cebody = read_exp() in
+    (cevar,cetype,cebody) 
   and read_exp () =
     let eloc = read() in
     let ekind  = match read() with
+    | "assign" ->
+      let id = read_id() in
+      let exp = read_exp() in
+      Assign(id,exp)
+    | "dynamic_dispatch" ->
+      let exp = read_exp() in
+      let id = read_id() in
+      let exp_list = read_list read_exp in
+      Dynamic_Dispatch(exp,id,exp_list)
+    | "static_dispatch" ->
+      let exp = read_exp() in
+      let id1 = read_id() in
+      let id2 = read_id() in
+      let exp_list = read_list read_exp in
+      Static_Dispatch(exp,id1,id2,exp_list)
+    | "self_dispatch" ->
+      let id = read_id() in
+      let expl = read_list (read_exp) in
+      Self_Dispatch(id,expl)
+    | "if" ->
+      let _if = read_exp() in
+      let _then = read_exp() in
+      let _else = read_exp() in
+      If(_if,_then,_else)
+    | "while" ->
+      let _while = read_exp() in
+      let body = read_exp() in
+      While(_while,body)
+    | "block" ->
+      Block(read_list read_exp)
+    | "new" ->
+      let ntype = read_id() in (*the class name*)
+      New(ntype) 
+    | "isvoid" ->
+      let exp = read_exp() in
+      IsVoid(exp)
+    | "plus" ->
+      let exp1 = read_exp() in
+      let exp2 = read_exp() in
+      Plus(exp1,exp2)
+    | "minus" ->
+      let exp1 = read_exp() in
+      let exp2 = read_exp() in
+      Minus(exp1,exp2)
+    | "times" ->
+      let exp1 = read_exp() in
+      let exp2 = read_exp() in
+      Times(exp1,exp2)
+    | "divide" ->
+      let exp1 = read_exp() in
+      let exp2 = read_exp() in
+      Divide(exp1,exp2)
+    | "lt" ->
+      let exp1 = read_exp() in
+      let exp2 = read_exp() in
+      LessThan(exp1,exp2)
+    | "le" ->
+      let exp1 = read_exp() in
+      let exp2 = read_exp() in
+      LessThanEqual(exp1,exp2)
+    | "eq" ->
+      let exp1 = read_exp() in
+      let exp2 = read_exp() in
+      Equal(exp1,exp2)
+    | "not" ->
+      let exp = read_exp() in
+      Not(exp)
+    | "negate" ->
+      let exp = read_exp() in
+      Negate(exp)
     | "integer" ->
       let ival=read() in 
       Integer(ival)
     | "string" ->
       let sval=read() in
       String(sval)
+    | "identifier" -> 
+      let ident = read_id () in
+      Identifier(ident)
     | "false" ->
       Bool("false")
     | "true" ->
       Bool("true")
-    | "new" ->
-      let ntype = read_id() in (*the class name*)
-      New(ntype) 
-    | "identifier" -> 
-      let ident = read_id () in
-      Identifier(ident)
-    | "block" ->
-      Block(read_list read_exp)
-    | "assign" ->
-      let id = read_id() in
-      let exp = read_exp() in
-      Assign(id,exp)
+    | "let" ->
+      let binding_list = read_list read_binding in
+      Let(eloc,binding_list)
+    | "case" ->
+      let case = read_exp() in
+      let case_elements = read_list(read_case_element) in
+      Case(eloc,case,case_elements)
     | x -> (*do all of other expressions*)
       failwith ("expression kind unhandled: " ^ x)
     in 
