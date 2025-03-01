@@ -294,28 +294,26 @@ information so you can do the checks more easily.*)
     parent_map 
   in
   let detect_inheritance_cycles parent_map =
-    (*
-    visited works differently than path,
-    it ensures that we dont visit the same node.
-    
-    path ensures that we dont visit the same node in the inheritance tree.
-    *)
+    (* ensure we dont visit the same classes *)
     let visited = Hashtbl.create (Hashtbl.length parent_map) in
     let rec dfs cname path =
-      (* already encountered this class! (from path variable) *)
+      (* already encountered this class! (in children classes) *)
       if List.mem cname path then begin
-        (*crm- inheritance cycle always line 0.*)
         printf "ERROR: 0: Type-Check: cyclic inheritance involving class %s and %s\n" cname (Hashtbl.find parent_map cname);
         exit 1
       end;
+      
+      (* traverse up inheritance tree if we have ohterwise not traversed to the class before *)
       if not (Hashtbl.mem visited cname) then begin 
         Hashtbl.add visited cname true;
+
         (* see if there are any parent nodes to traverse to. *)
         match Hashtbl.find_opt parent_map cname with
-        | Some parent -> dfs parent (cname :: path)
+        | Some parent -> dfs parent (cname :: path) (* keep track of previous children classes *)
         | None -> ()
       end
     in
+    (* dfs each class seperate group of inherited classes *)
     Hashtbl.iter(fun cname _ -> dfs cname []) parent_map 
   in
 
@@ -333,7 +331,7 @@ information so you can do the checks more easily.*)
     let class_features = 
       try
         (* extract features from cname *)
-        let _,_,features = List.find(fun ((_,cname2),_,_) -> cname = cname2) ast in
+        let (_,_,features) = List.find(fun ((_,cname2),_,_) -> cname = cname2) ast in
         features
       with Not_found -> []
     in
@@ -345,6 +343,19 @@ information so you can do the checks more easily.*)
       match parent with
       | [] -> child (* parent has no attributes *)
       | (Attribute((_,aname),_,_) as attr) :: rest ->
+
+          (* ensure that the attribute is not already declared in parent. *)
+          List.iter (fun (a) -> (
+            match a with 
+            | Attribute((aloc,aname2),_,_) -> (
+              if aname = aname2 then begin
+                printf "ERROR: %s: Type-Check: class %s redefines attribute %s\n" aloc cname aname;
+                exit 1
+              end
+            )
+            | _ -> ()
+          ) ) child;
+
           (* if the attribute exists in the child *)
           if List.exists (fun feature ->
             match feature with
@@ -473,15 +484,10 @@ information so you can do the checks more easily.*)
   check_class_redeclaration ast;
 
 
-
-
-
-
-
   (*
     Typechecking methods
   *)
-  List.iter (fun((cloc,cname),_,_) ->
+  List.iter (fun((cloc,cname),_,current_features) ->
     let features = collect_features parent_map ast cname in
     let seen_methods = Hashtbl.create (List.length features) in
     let seen_attributes = Hashtbl.create (List.length features) in
@@ -490,41 +496,37 @@ information so you can do the checks more easily.*)
         exit 1
     end;
  
+    (*check for main method*)
     if cname = "Main" then begin
       let has_main = List.exists(fun m -> match m with
         | Method((_,mname),_,_,_) -> mname = "main"
-        | _ -> false) features
+        | _ -> false) current_features
       in 
       if not has_main then begin
         printf "ERROR: 0: Type-Check: class Main method main not found!!\n";
         exit 1
       end 
-      (*
       else begin
         List.iter (fun (m) -> (
           match m with 
-          | Method ((_,mname),formals,_,_) ->
+          | Method ((_,mname),mformals,_,_) ->
             (
               if mname = "main" then begin
-                if(List.length formals) <> 0 then
+                if(List.length mformals) <> 0 then begin 
                   printf "ERROR: 0: Type-Check: class Main method main with 0 parameters not found\n";
                   exit 1
+                end
               end
             )
           | _ -> ()
-        )) features
+        )) current_features
       end
-      *) 
     end;
+
     List.iter(fun(feature) -> (
     match feature with
     | Method((mloc,mname),formals,_,_) -> 
-      (*check for main method*)
-      
-      (* 
-      check formals
-      *)
-      
+      (* check formals *)
       let seen_formals = Hashtbl.create (List.length formals) in
       
       List.iter (fun ((floc,fname),(_,ftype)) -> 
@@ -551,6 +553,7 @@ information so you can do the checks more easily.*)
       end;
       
       Hashtbl.add seen_methods mname true
+
     | Attribute((aloc,aname),(tloc,tname),None) -> 
       (*Check for nonexistent type for attribute*)
       if not ( List.mem tname all_classes )then begin
