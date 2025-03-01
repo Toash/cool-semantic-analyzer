@@ -1,6 +1,6 @@
 (* 
 current score:
-31/40
+35/40
 *)
 (*
 Basically, you’ll look at classes, methods and attibutes (but not method bodies).
@@ -318,13 +318,6 @@ information so you can do the checks more easily.*)
     in
     Hashtbl.iter(fun cname _ -> dfs cname []) parent_map 
   in
-  let io_methods = [
-  Method(("", "out_string"), [(("", "x"), ("", "String"))], ("", "SELF_TYPE"), ("",Identifier("", "SELF_TYPE")));
-  Method(("", "out_int"), [(("", "x"), ("", "Int"))], ("", "SELF_TYPE"), ("",Identifier("", "SELF_TYPE")));
-  Method(("", "in_string"), [], ("", "String"), ("",Identifier("", "String")));
-  Method(("", "in_int"), [], ("", "Int"), ("",Identifier("", "Int")));
-  ] 
-  in
 
   (* 
   given a class name, collect all of its features(including from inherited classes 
@@ -338,10 +331,6 @@ information so you can do the checks more easily.*)
     | None -> [] (* base class, no parent*)
     in  
     let class_features = 
-      if cname = "IO" then begin
-        io_methods
-      end
-      else
       try
         (* extract features from cname *)
         let _,_,features = List.find(fun ((_,cname2),_,_) -> cname = cname2) ast in
@@ -432,6 +421,11 @@ information so you can do the checks more easily.*)
         printf "ERROR: %s: Type-Check: class String redefined\n" cloc;
         exit 1
       end;
+      if cname = "Bool" then begin
+        printf "ERROR: %s: Type-Check: class Bool redefined\n" cloc;
+        exit 1
+      end;
+
 
 
     (*
@@ -445,6 +439,10 @@ information so you can do the checks more easily.*)
         exit 1
       end;
       if iname = "String" then begin
+        printf "ERROR: %s: Type-Check: inheriting from forbidden class %s\n" iloc iname;
+        exit 1
+      end;
+      if iname = "Bool" then begin
         printf "ERROR: %s: Type-Check: inheriting from forbidden class %s\n" iloc iname;
         exit 1
       end;
@@ -492,21 +490,36 @@ information so you can do the checks more easily.*)
         exit 1
     end;
  
+    if cname = "Main" then begin
+      let has_main = List.exists(fun m -> match m with
+        | Method((_,mname),_,_,_) -> mname = "main"
+        | _ -> false) features
+      in 
+      if not has_main then begin
+        printf "ERROR: 0: Type-Check: class Main method main not found!!\n";
+        exit 1
+      end 
+      (*
+      else begin
+        List.iter (fun (m) -> (
+          match m with 
+          | Method ((_,mname),formals,_,_) ->
+            (
+              if mname = "main" then begin
+                if(List.length formals) <> 0 then
+                  printf "ERROR: 0: Type-Check: class Main method main with 0 parameters not found\n";
+                  exit 1
+              end
+            )
+          | _ -> ()
+        )) features
+      end
+      *) 
+    end;
     List.iter(fun(feature) -> (
     match feature with
     | Method((mloc,mname),formals,_,_) -> 
       (*check for main method*)
-      if cname = "Main" then begin
-        let has_main = List.exists(fun m -> match m with
-          | Method((_,mname),_,_,_) -> mname = "main"
-          | _ -> false) features
-        in 
-        if not has_main then begin
-          printf "ERROR: 0: Type-Check: class Main method main not found!!\n";
-          exit 1
-        end
-        
-      end;
       
       (* 
       check formals
