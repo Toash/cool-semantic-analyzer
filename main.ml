@@ -674,7 +674,7 @@ information so you can do the checks more easily.*)
     | Identifier((id_loc, id_name)) ->
         fprintf fout "identifier\n%s\n%s\n" id_loc id_name
     | Bool(bval) ->
-        fprintf fout "bool\n%s\n" bval
+        fprintf fout "%s\n" bval
     | Let(bindings,body) ->
         fprintf fout "let\n";
         fprintf fout "%s\n" (string_of_int (List.length bindings));
