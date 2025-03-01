@@ -1,6 +1,6 @@
 (* 
 current score:
-35/40
+36/40
 *)
 (*
 Basically, you’ll look at classes, methods and attibutes (but not method bodies).
@@ -424,6 +424,10 @@ information so you can do the checks more easily.*)
     (*
       Ensure that we dont redefine IO or String
     *)
+      if cname = "Int" then begin
+        printf "ERROR: %s: Type-Check: class Int redefined\n" cloc;
+        exit 1
+      end;
       if cname = "IO" then begin
         printf "ERROR: %s: Type-Check: class IO redefined\n" cloc;
         exit 1

@@ -6,10 +6,6 @@ class Main {
 	};	
 };
 
-class A {
-	a:Int <- 1;
-};
+class Int {
 
-class B inherits A{
-	a:String<-"a";
 };
