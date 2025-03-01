@@ -1,6 +1,6 @@
 (* 
 current score:
-27/40
+31/40
 *)
 (*
 Basically, you’ll look at classes, methods and attibutes (but not method bodies).
@@ -12,6 +12,15 @@ https://www.youtube.com/watch?v=Wa9zMygcv_M&ab_channel=WestleyWeimer
 *)
 
 
+(*
+
+we can test out type chceker by running it against good code-
+- helps develop completeness
+
+or running it against bad code (the test cases we made)
+- helps develop soundness
+
+*)
 open Printf
 
 type cool_program = cool_class list
@@ -590,15 +599,21 @@ information so you can do the checks more easily.*)
         fprintf fout "assign\n%s\n%s\n" id_loc id_name;
         output_exp exp
     | Dynamic_Dispatch(exp, (id_loc, id_name), exp_list) ->
-        fprintf fout "dynamic_dispatch\n%s\n%s\n" id_loc id_name;
+        fprintf fout "dynamic_dispatch\n";
         output_exp exp;
+        fprintf fout "%s\n%s\n" id_loc id_name;
+        fprintf fout "%s\n" (string_of_int(List.length exp_list));
         List.iter output_exp exp_list
-    | Static_Dispatch(exp, (t_loc, t_name), (m_loc, m_name), exp_list) ->
-        fprintf fout "static_dispatch\n%s\n%s\n%s\n%s\n" t_loc t_name m_loc m_name;
+    | Static_Dispatch(exp, (t_loc, t_name), (id_loc, id_name), exp_list) ->
+        fprintf fout "static_dispatch\n";
         output_exp exp;
+        fprintf fout "%s\n%s\n" t_loc t_name;
+        fprintf fout "%s\n%s\n" id_loc id_name;
+        fprintf fout "%s\n" (string_of_int(List.length exp_list));
         List.iter output_exp exp_list
     | Self_Dispatch((id_loc, id_name), exp_list) ->
         fprintf fout "self_dispatch\n%s\n%s\n" id_loc id_name;
+        fprintf fout "%s\n" (string_of_int(List.length exp_list));
         List.iter output_exp exp_list
     | If(exp1, exp2, exp3) ->
         fprintf fout "if\n";
@@ -611,6 +626,7 @@ information so you can do the checks more easily.*)
         output_exp exp2
     | Block(exp_list) ->
         fprintf fout "block\n";
+        fprintf fout "%s\n" (string_of_int (List.length exp_list));
         List.iter output_exp exp_list
     | New((nloc, nval)) ->
         fprintf fout "new\n%s\n%s\n" nloc nval
@@ -676,6 +692,7 @@ information so you can do the checks more easily.*)
     | Case(_, exp, cases) ->
         fprintf fout "case\n";
         output_exp exp;
+        fprintf fout "%s\n" (string_of_int (List.length cases));
         List.iter (fun ((id_loc, id_name), (type_loc, type_name), exp) ->
           fprintf fout "%s\n%s\n%s\n%s\n" id_loc id_name type_loc type_name;
           output_exp exp) cases
