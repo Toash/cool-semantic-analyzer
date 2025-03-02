@@ -42,17 +42,30 @@ let rec is_subtype t1 t2 =
   | Class(x), Class("Object") -> true
   | Class(x), Class(y) -> false (*TODO: check parent map*)
   | _,_ -> false (* TODO: SELF_TYPE shenanigans *)
-
 (*
-maps identifier names to static types.
-theres going to be times where we want to declare typed variables for a limited time
-    (For example, typechecking let body with the typed bindings.)
-to do that, we can just add to the hashtbl, then remove from it.
-*)
-type object_environment =
-    (string, static_type) Hashtbl.t
+typechecking will need O, M, C
+type environment consists of three parts:
+Objects - mapping from object identifiers (names) to types!
+    * for example, in a let expression we need the type of the variable so that we can...
+        * check if hte initializer expression has the right type
+        * typecheck the let body (assuming we use the variable in it.)
+
+Methods - mapping from (Class C, method f) to signature (check page 22 of CRM)
+    *note - the signature of the method is the tuple of types.
+    *example - (t1,t2,...tn-1,tn)
+    * to read, In class C, method f has formal parameter of types (t1,...,tn-1)
+        , and a return type of tn
+    * signature types to do typechecking on the signatures. 
+        
+Current class - name of current class, this is needed for type rules involving SELF_TYPE
+ *)
+type object_environment = (string, static_type) Hashtbl.t
+(* we only care about the types *)
+type method_environment = ((string * string), (static_type list * static_type)) Hashtbl.t
+    
 
 let empty_object_environment () = Hashtbl.create 255
+let m_env:method_environment  = Hashtbl.create 255 
 
 type cool_program = cool_class list
 and loc = string (*really an integer*)
@@ -653,6 +666,28 @@ information so you can do the checks more easily.*)
    (* DONE WITH ERROR CHECKING *)
 
 
+    (* 
+       BUILD THE METHOD ENVIRONMENT
+       loop over ast, (each class)
+       for each class, loop throuhg methods
+       Update the method environment with the 
+            Class name, method name, list of formal types, and return type
+    *)
+    List.iter (fun((_,cname),_,features) -> 
+        (*loop through features for a class *)
+       List.iter(fun feat -> 
+           match feat with
+           | Method((_,mname),formals, (_,rtype),_) -> (
+               (* extract types from formals *)
+               let formal_types = List.map (fun ((_,_),(_,ftype)) ->
+                    Class ftype
+                ) formals 
+                in 
+                Hashtbl.add m_env (cname, mname) (formal_types, Class rtype)
+           ) 
+            | _ -> ()
+        ) features 
+    ) ast;
    (* 
    TIME TO DO EXPRESSION TYPECHECKING 
    1. Iterate over every class
@@ -666,24 +701,6 @@ information so you can do the checks more easily.*)
         ( will probably be tested on this :/)
    *)
     
-
-    (*
-    typechecking will need O, M, C
-    type environment consists of three parts:
-    Objects - mapping from object identifiers (names) to types!
-        * for example, in a let expression we need the type of the variable so that we can...
-            * check if hte initializer expression has the right type
-            * typecheck the let body (assuming we use the variable in it.)
-
-    Methods - mapping from (Class C, method f) to signature (check page 22 of CRM)
-        *note - the signature of the method is the tuple of types.
-        *example - (t1,t2,...tn-1,tn)
-        * to read, In class C, method f has formal parameter of types (t1,...,tn-1)
-            , and a return type of tn
-        * signature types to do typechecking on the signatures. 
-            
-    Current class - name of current class, this is needed for type rules involving SELF_TYPE
-     *)
     let rec typecheck (o: object_environment) (exp : exp) : static_type =
         let static_type = match exp.exp_kind with
         | Integer(i) -> (Class "Int")
