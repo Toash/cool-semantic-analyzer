@@ -23,6 +23,37 @@ or running it against bad code (the test cases we made)
 *)
 open Printf
 
+
+(* static type of cool expression*)
+type static_type = 
+| Class of string (*Int, or Object etc*)
+| SELF_TYPE of string (*implement later*)
+
+let type_to_str t = match t with
+| Class(x) -> x
+| SELF_TYPE(c) -> "SELF_TYPE"
+
+(* liskov substitution principle*)
+(* Int <= Object *)
+(* String <= String *)
+let rec is_subtype t1 t2 = 
+  match t1, t2 with
+  | Class(x), Class(y) when x = y -> true
+  | Class(x), Class("Object") -> true
+  | Class(x), Class(y) -> false (*TODO: check parent map*)
+  | _,_ -> false (* TODO: SELF_TYPE shenanigans *)
+
+(*
+maps identifier names to static types.
+theres going to be times where we want to declare typed variables for a limited time
+    (For example, typechecking let body with the typed bindings.)
+to do that, we can just add to the hashtbl, then remove from it.
+*)
+type object_environment =
+    (string, static_type) Hashtbl.t
+
+let empty_object_environment () = Hashtbl.create 255
+
 type cool_program = cool_class list
 and loc = string (*really an integer*)
 and id = loc * string 
@@ -45,7 +76,13 @@ and formal = id * cool_type (*formals are the parameters listed in the method si
 and binding = id * cool_type * (exp option) (* let initialize or no intialize*)
 and case_element = id * cool_type * exp 
 
-and exp = loc * exp_kind
+(* wrapper for all things expressions *)
+and exp = {
+  loc: loc;
+  exp_kind:exp_kind;
+  (* starts out as None, but in the process of type  checking we'll fill it out. *)
+  mutable static_type : static_type option; 
+}
 and exp_kind = (* represents the type and values of expressions*)
   | Assign of id * exp
   | Dynamic_Dispatch of exp * id * exp list
@@ -257,7 +294,11 @@ let main () = begin
     | x -> (*do all of other expressions*)
       failwith ("expression kind unhandled: " ^ x)
     in 
-    (eloc, ekind)
+    {
+      loc = eloc;
+      exp_kind = ekind;
+      static_type = None; (* havent annotated yet*)
+    }
   in
 
   let ast = read_cool_program() in
@@ -492,230 +533,375 @@ information so you can do the checks more easily.*)
     Typechecking methods
   *)
   List.iter (fun((cloc,cname),_,current_features) ->
-    let features = collect_features parent_map ast cname in
-    let seen_methods = Hashtbl.create (List.length features) in
-    let seen_attributes = Hashtbl.create (List.length features) in
-    if cname = "Main" && List.length features = 0 then begin
-        printf "ERROR: 0: Type-Check: class Main method main not found!!\n";
-        exit 1
-    end;
- 
-    (*check for main method*)
-    if cname = "Main" then begin
-      let has_main = List.exists(fun m -> match m with
-        | Method((_,mname),_,_,_) -> mname = "main"
-        | _ -> false) current_features
-      in 
-      if not has_main then begin
-        printf "ERROR: 0: Type-Check: class Main method main not found!!\n";
-        exit 1
-      end 
-      else begin
-        List.iter (fun (m) -> (
-          match m with 
-          | Method ((_,mname),mformals,_,_) ->
-            (
-              if mname = "main" then begin
-                if(List.length mformals) <> 0 then begin 
-                  printf "ERROR: 0: Type-Check: class Main method main with 0 parameters not found\n";
-                  exit 1
-                end
-              end
-            )
-          | _ -> ()
-        )) current_features
-      end
-    end;
-
-    List.iter(fun(feature) -> (
-    match feature with
-    | Method((mloc,mname),formals,_,_) -> 
-      (* check formals *)
-      let seen_formals = Hashtbl.create (List.length formals) in
-      
-      List.iter (fun ((floc,fname),(_,ftype)) -> 
-        
-        if Hashtbl.mem seen_formals fname then begin
-          printf "ERROR: %s: Type-Check: class %s has method %s with duplicate formal %s!\n" floc cname mname fname;
-          exit 1
+        let features = collect_features parent_map ast cname in
+        let seen_methods = Hashtbl.create (List.length features) in
+        let seen_attributes = Hashtbl.create (List.length features) in
+        if cname = "Main" && List.length features = 0 then begin
+            printf "ERROR: 0: Type-Check: class Main method main not found!!\n";
+            exit 1
         end;
-        Hashtbl.add seen_formals fname true;
+     
+        (*check for main method*)
+        if cname = "Main" then begin
+          let has_main = List.exists(fun m -> match m with
+            | Method((_,mname),_,_,_) -> mname = "main"
+            | _ -> false) current_features
+          in 
+          if not has_main then begin
+            printf "ERROR: 0: Type-Check: class Main method main not found!!\n";
+            exit 1
+          end 
+          else begin
+            List.iter (fun (m) -> (
+              match m with 
+              | Method ((_,mname),mformals,_,_) ->
+                (
+                  if mname = "main" then begin
+                    if(List.length mformals) <> 0 then begin 
+                      printf "ERROR: 0: Type-Check: class Main method main with 0 parameters not found\n";
+                      exit 1
+                    end
+                  end
+                )
+              | _ -> ()
+            )) current_features
+          end
+        end;
 
-        (* check if formal has type that exists *)
-        if not (List.mem ftype all_classes) then begin
-          printf "ERROR: %s: Type-Check: class %s has method %s with formal parameter of unknown type %s\n" floc cname mname ftype;
-          exit 1
-        end
-        ) formals;
+        List.iter(fun(feature) -> (
+        match feature with
+        | Method((mloc,mname),formals,_,_) -> 
+          (* check formals *)
+          let seen_formals = Hashtbl.create (List.length formals) in
+          
+          List.iter (fun ((floc,fname),(_,ftype)) -> 
+            
+            if Hashtbl.mem seen_formals fname then begin
+              printf "ERROR: %s: Type-Check: class %s has method %s with duplicate formal %s!\n" floc cname mname fname;
+              exit 1
+            end;
+            Hashtbl.add seen_formals fname true;
 
-      (*
-        check for duplicate method
-      *)
-      if Hashtbl.mem seen_methods mname then begin
-        printf "ERROR: %s: Type-Check: cannot redeclare Method %s in class %s!\n" mloc mname cname;
-        exit 1
-      end;
-      
-      Hashtbl.add seen_methods mname true
+            (* check if formal has type that exists *)
+            if not (List.mem ftype all_classes) then begin
+              printf "ERROR: %s: Type-Check: class %s has method %s with formal parameter of unknown type %s\n" floc cname mname ftype;
+              exit 1
+            end
+            ) formals;
 
-    | Attribute((aloc,aname),(tloc,tname),None) -> 
-      (*Check for nonexistent type for attribute*)
-      if not ( List.mem tname all_classes )then begin
-        printf "ERROR: %s: Type-Check: class %s has attribute %s with unknown type %s\n" tloc cname aname tname;
-        exit 1
-      end;
+          (*
+            check for duplicate method
+          *)
+          if Hashtbl.mem seen_methods mname then begin
+            printf "ERROR: %s: Type-Check: cannot redeclare Method %s in class %s!\n" mloc mname cname;
+            exit 1
+          end;
+          
+          Hashtbl.add seen_methods mname true
 
-      (* Check for mismatched types for attributes*)
-      if Hashtbl.mem seen_attributes aname then begin
-        printf "ERROR: %s: Type-Check: cannot redeclare Attribute %s in class %s!\n" aloc aname cname;
-        exit 1
-      end;
-      Hashtbl.add seen_attributes aname true
-      
-     | Attribute((aloc,aname),(tloc,tname),Some(exp)) -> 
-      (* DRY oops*)
-            (*Check for nonexistent type for attribute*)
-      if not ( List.mem tname all_classes )then begin
-        printf "ERROR: %s: Type-Check: class %s has attribute %s with unknown type %s\n" tloc cname aname tname;
-        exit 1
-      end;
+        | Attribute((aloc,aname),(tloc,tname),None) -> 
+          (*Check for nonexistent type for attribute*)
+          if not ( List.mem tname all_classes )then begin
+            printf "ERROR: %s: Type-Check: class %s has attribute %s with unknown type %s\n" tloc cname aname tname;
+            exit 1
+          end;
 
-      (* Check for mismatched types for attributes*)
-      if Hashtbl.mem seen_attributes aname then begin
-        printf "ERROR: %s: Type-Check: cannot redeclare Attribute %s in class %s!\n" aloc aname cname;
-        exit 1
-      end;
-      Hashtbl.add seen_attributes aname true;
-      
-      (*check if expression type matches attribute type*)
-        (* should we generalize to user defined classes? i dunno*)
-      let check_expression_type loc expression_type attribute_type = 
-        if attribute_type <> expression_type && attribute_type <> "Object" then begin
-          printf "ERROR: %s: Type-Check: %s does not conform to %s in initialized attribute\n" loc expression_type attribute_type;
-          exit 1
-        end
-      in
-      match exp with
-      | (_, Integer(_)) -> check_expression_type tloc "Int" tname
-      | (_, String(_)) -> check_expression_type tloc "String" tname
-      | (_, Bool(_)) -> check_expression_type tloc "Bool" tname
-      | _ -> ()
-    )) features
-  ) ast;
+          (* Check for mismatched types for attributes*)
+          if Hashtbl.mem seen_attributes aname then begin
+            printf "ERROR: %s: Type-Check: cannot redeclare Attribute %s in class %s!\n" aloc aname cname;
+            exit 1
+          end;
+          Hashtbl.add seen_attributes aname true
+          
+         | Attribute((aloc,aname),(tloc,tname),Some(exp)) -> 
+          (* DRY oops*)
+                (*Check for nonexistent type for attribute*)
+          if not ( List.mem tname all_classes )then begin
+            printf "ERROR: %s: Type-Check: class %s has attribute %s with unknown type %s\n" tloc cname aname tname;
+            exit 1
+          end;
+
+          (* Check for mismatched types for attributes*)
+          if Hashtbl.mem seen_attributes aname then begin
+            printf "ERROR: %s: Type-Check: cannot redeclare Attribute %s in class %s!\n" aloc aname cname;
+            exit 1
+          end;
+          Hashtbl.add seen_attributes aname true;
+          
+          (*check if expression type matches attribute type*)
+            (* should we generalize to user defined classes? i dunno*)
+          (*
+          I think we were supposed to do this after annotating expressions
+          let check_expression_type loc expression_type attribute_type = 
+            if attribute_type <> expression_type && attribute_type <> "Object" then begin
+              printf "ERROR: %s: Type-Check: %s does not conform to %s in initialized attribute\n" loc expression_type attribute_type;
+              exit 1
+            end
+          in
+          match exp with
+          | (_, Integer(_)) -> check_expression_type tloc "Int" tname
+          | (_, String(_)) -> check_expression_type tloc "String" tname
+          | (_, Bool(_)) -> check_expression_type tloc "Bool" tname
+          | _ -> ()
+            *)
+        )) features
+        
+    
+    ) ast;
    
   
    (* DONE WITH ERROR CHECKING *)
+
+
+   (* 
+   TIME TO DO EXPRESSION TYPECHECKING 
+   1. Iterate over every class
+   2. Iterate over every feature. 
+   3. Typecheck the expressoins in that feature.
+
+   We implement our expression typechecking procedure
+   by reading the typing rules from the CRM or class notes.
+
+   Every line in a typing rule corresponds to a line in typechecking code.
+        ( will probably be tested on this :/)
+   *)
+    
+
+    (*
+    typechecking will need O, M, C
+    type environment consists of three parts:
+    Objects - mapping from object identifiers (names) to types!
+        * for example, in a let expression we need the type of the variable so that we can...
+            * check if hte initializer expression has the right type
+            * typecheck the let body (assuming we use the variable in it.)
+
+    Methods - mapping from (Class C, method f) to signature (check page 22 of CRM)
+        *note - the signature of the method is the tuple of types.
+        *example - (t1,t2,...tn-1,tn)
+        * to read, In class C, method f has formal parameter of types (t1,...,tn-1)
+            , and a return type of tn
+        * signature types to do typechecking on the signatures. 
+            
+    Current class - name of current class, this is needed for type rules involving SELF_TYPE
+     *)
+    let rec typecheck (o: object_environment) (exp : exp) : static_type =
+        let static_type = match exp.exp_kind with
+        | Integer(i) -> (Class "Int")
+        | Plus(e1, e2) ->
+            (
+            (*
+                O |- e1 : Int       [1]
+                O |- e2 : Int       [2]
+                --------------------------
+                O |- e1 + e2 : Int  [3]
+            *)
+            
+            (*[1]*)
+            let t1 = typecheck o e1 in
+            if t1 <> (Class "Int") then begin
+                printf "ERROR: %s: Type-Check: adding %s instead of Int\n" exp.loc (type_to_str t1);
+                exit 1
+            end;
+            (*[2]*)
+             let t2 = typecheck o e2 in
+            if t2 <> (Class "Int") then begin
+                printf "ERROR: %s: Type-Check: adding %s instead of Int\n" exp.loc (type_to_str t2);
+                exit 1
+            end;
+            (*[3]*)
+            (Class "Int");
+            )
+        | Identifier((vloc,vname)) -> 
+            if Hashtbl.mem o vname then
+                (
+                Hashtbl.find o vname;
+                )
+            else begin
+                printf "ERROR: %s Type-Check: undeclared variable %s\n" vloc, vname;
+                exit 1
+            end
+        | Let(bindings,body) ->
+            (*
+            This is the extend O with x having type T0 part
+            we will add the declare variable to object environment,
+            then type chcek the expression with this "extended" environment.
+
+            After doing so, we remove x having type T0 from typing environment.
+            *)
+            List.iter (fun ((vloc,vname),(tloc,tname),init) -> 
+                match init with 
+                | None -> (
+                    (* add variable to current scope *)
+                    Hashtbl.add o vname (Class tname) (* TODO: SELF_TYPE*)
+                )
+            ) bindings;
+            (* typecheck let body with bound varible added to the object environment*)
+            let body_type = typecheck o body in 
+
+            (*
+            IMPORTANT - remove object identifier(s)
+            This is where mutable data can become tricky to debug :/
+            *)
+            List.iter( fun((_,vname),(_,_),_) ->
+                Hashtbl.remove o vname
+            ) bindings;
+
+            body_type
+        in        
+        (* annotate the AST with the new found static type! *)
+        exp.static_type <- Some(static_type);
+        static_type
+    in
+
+    (*iterate over every class and typecheck all features*)
+    List.iter (fun((cloc,cname),inherits,features)->
+        List.iter (fun feat -> 
+            match feat with 
+            | Attribute((nameloc,name),(dtloc,declared_type),Some(init_exp)) -> (
+                (* 
+                   x : Int <- 5+3 
+                   1. typecheck initializer expression
+                   2. ensure that it conforms to the variable type. 
+                *)
+                (* TODO: THIS IS WRONG, CONSIDER INHERITED FEATURES IN OBJECT ENVIRONMENT*)
+                let o = empty_object_environment () in
+
+                let init_type = typecheck o init_exp in 
+                if is_subtype init_type (Class declared_type) then
+                    (*good*)
+                    ()
+                else begin
+                    printf "ERROR: %s: Type-Check initializer for %s should be %s not %s\n" nameloc name declared_type (type_to_str init_type);
+                    exit 1
+                end
+
+            )
+            | _ -> () (*TODO: Typecheck attribute without initializre exp*)
+            | Method _ -> () (*TODO: Typecheck methods*)
+        ) features;
+    ) ast;
 
    (* emit cl-type file*)
    let cmname = (Filename.chop_extension fname) ^ ".cl-type" in
    let fout = open_out cmname in
 
-   
-   let rec output_exp (eloc, ekind) =
-    (* print expressions with line number first *)
-    fprintf fout "%s\n" eloc;
-    match ekind with
-    | Assign((id_loc, id_name), exp) ->
-        fprintf fout "assign\n%s\n%s\n" id_loc id_name;
-        output_exp exp
-    | Dynamic_Dispatch(exp, (id_loc, id_name), exp_list) ->
-        fprintf fout "dynamic_dispatch\n";
-        output_exp exp;
-        fprintf fout "%s\n%s\n" id_loc id_name;
-        fprintf fout "%s\n" (string_of_int(List.length exp_list));
-        List.iter output_exp exp_list
-    | Static_Dispatch(exp, (t_loc, t_name), (id_loc, id_name), exp_list) ->
-        fprintf fout "static_dispatch\n";
-        output_exp exp;
-        fprintf fout "%s\n%s\n" t_loc t_name;
-        fprintf fout "%s\n%s\n" id_loc id_name;
-        fprintf fout "%s\n" (string_of_int(List.length exp_list));
-        List.iter output_exp exp_list
-    | Self_Dispatch((id_loc, id_name), exp_list) ->
-        fprintf fout "self_dispatch\n%s\n%s\n" id_loc id_name;
-        fprintf fout "%s\n" (string_of_int(List.length exp_list));
-        List.iter output_exp exp_list
-    | If(exp1, exp2, exp3) ->
-        fprintf fout "if\n";
-        output_exp exp1;
-        output_exp exp2;
-        output_exp exp3
-    | While(exp1, exp2) ->
-        fprintf fout "while\n";
-        output_exp exp1;
-        output_exp exp2
-    | Block(exp_list) ->
-        fprintf fout "block\n";
-        fprintf fout "%s\n" (string_of_int (List.length exp_list));
-        List.iter output_exp exp_list
-    | New((nloc, nval)) ->
-        fprintf fout "new\n%s\n%s\n" nloc nval
-    | IsVoid(e) ->
-        fprintf fout "isvoid\n";
-        output_exp e
-    | Plus(exp1, exp2) ->
-        fprintf fout "plus\n";
-        output_exp exp1;
-        output_exp exp2
-    | Minus(exp1, exp2) ->
-        fprintf fout "minus\n";
-        output_exp exp1;
-        output_exp exp2
-    | Times(exp1, exp2) ->
-        fprintf fout "times\n";
-        output_exp exp1;
-        output_exp exp2
-    | Divide(exp1, exp2) ->
-        fprintf fout "divide\n";
-        output_exp exp1;
-        output_exp exp2
-    | LessThan(exp1, exp2) ->
-        fprintf fout "lt\n";
-        output_exp exp1;
-        output_exp exp2
-    | LessThanEqual(exp1, exp2) ->
-        fprintf fout "le\n";
-        output_exp exp1;
-        output_exp exp2
-    | Equal(exp1, exp2) ->
-        fprintf fout "eq\n";
-        output_exp exp1;
-        output_exp exp2
-    | Not(exp) ->
-        fprintf fout "not\n";
-        output_exp exp
-    | Negate(exp) ->
-        fprintf fout "negate\n";
-        output_exp exp
-    | Integer(ival) ->
-        fprintf fout "integer\n%s\n" ival
-    | String(sval) ->
-        fprintf fout "string\n%s\n" sval
-    | Identifier((id_loc, id_name)) ->
-        fprintf fout "identifier\n%s\n%s\n" id_loc id_name
-    | Bool(bval) ->
-        fprintf fout "%s\n" bval
-    | Let(bindings,body) ->
-        fprintf fout "let\n";
-        fprintf fout "%s\n" (string_of_int (List.length bindings));
-        List.iter (fun ((id_loc, id_name), (type_loc, type_name), exp_opt) ->
-          (
-           match exp_opt with
-           | Some exp ->  fprintf fout "let_binding_init\n"
-           | None -> fprintf fout "let_binding_no_init\n"
-          );
-          fprintf fout "%s\n%s\n%s\n%s\n" id_loc id_name type_loc type_name;
-          (match exp_opt with 
-          | Some exp -> output_exp exp 
-          | None -> ())) bindings;
-          output_exp body
-    | Case(_, exp, cases) ->
-        fprintf fout "case\n";
-        output_exp exp;
-        fprintf fout "%s\n" (string_of_int (List.length cases));
-        List.iter (fun ((id_loc, id_name), (type_loc, type_name), exp) ->
-          fprintf fout "%s\n%s\n%s\n%s\n" id_loc id_name type_loc type_name;
-          output_exp exp) cases
+   let rec output_exp (e) =
+        (* print expressions with line number first *)
+        fprintf fout "%s\n" e.loc;
+
+       (* now after the location, print out the TYPE ANNOTATION ( and then newline)*)
+       (match e.static_type with
+       | None -> ( 
+           printf "line %s: forgot to do typechecking???\n" e.loc;
+           exit 1
+       )
+       | Some(Class(c)) -> fprintf fout "%s\n" c
+       | Some(SELF_TYPE(c)) -> failwith "need to implement self type... :(");
+
+       
+        match e.exp_kind with
+        | Assign((id_loc, id_name), exp) ->
+              
+            fprintf fout "assign\n%s\n%s\n" id_loc id_name;
+            output_exp exp
+        | Dynamic_Dispatch(exp, (id_loc, id_name), exp_list) ->
+            fprintf fout "dynamic_dispatch\n";
+            output_exp exp;
+            fprintf fout "%s\n%s\n" id_loc id_name;
+            fprintf fout "%s\n" (string_of_int(List.length exp_list));
+            List.iter output_exp exp_list
+        | Static_Dispatch(exp, (t_loc, t_name), (id_loc, id_name), exp_list) ->
+            fprintf fout "static_dispatch\n";
+            output_exp exp;
+            fprintf fout "%s\n%s\n" t_loc t_name;
+            fprintf fout "%s\n%s\n" id_loc id_name;
+            fprintf fout "%s\n" (string_of_int(List.length exp_list));
+            List.iter output_exp exp_list
+        | Self_Dispatch((id_loc, id_name), exp_list) ->
+            fprintf fout "self_dispatch\n%s\n%s\n" id_loc id_name;
+            fprintf fout "%s\n" (string_of_int(List.length exp_list));
+            List.iter output_exp exp_list
+        | If(exp1, exp2, exp3) ->
+            fprintf fout "if\n";
+            output_exp exp1;
+            output_exp exp2;
+            output_exp exp3
+        | While(exp1, exp2) ->
+            fprintf fout "while\n";
+            output_exp exp1;
+            output_exp exp2
+        | Block(exp_list) ->
+            fprintf fout "block\n";
+            fprintf fout "%s\n" (string_of_int (List.length exp_list));
+            List.iter output_exp exp_list
+        | New((nloc, nval)) ->
+            fprintf fout "new\n%s\n%s\n" nloc nval
+        | IsVoid(e) ->
+            fprintf fout "isvoid\n";
+            output_exp e
+        | Plus(exp1, exp2) ->
+            fprintf fout "plus\n";
+            output_exp exp1;
+            output_exp exp2
+        | Minus(exp1, exp2) ->
+            fprintf fout "minus\n";
+            output_exp exp1;
+            output_exp exp2
+        | Times(exp1, exp2) ->
+            fprintf fout "times\n";
+            output_exp exp1;
+            output_exp exp2
+        | Divide(exp1, exp2) ->
+            fprintf fout "divide\n";
+            output_exp exp1;
+            output_exp exp2
+        | LessThan(exp1, exp2) ->
+            fprintf fout "lt\n";
+            output_exp exp1;
+            output_exp exp2
+        | LessThanEqual(exp1, exp2) ->
+            fprintf fout "le\n";
+            output_exp exp1;
+            output_exp exp2
+        | Equal(exp1, exp2) ->
+            fprintf fout "eq\n";
+            output_exp exp1;
+            output_exp exp2
+        | Not(exp) ->
+            fprintf fout "not\n";
+            output_exp exp
+        | Negate(exp) ->
+            fprintf fout "negate\n";
+            output_exp exp
+        | Integer(ival) ->
+            fprintf fout "integer\n%s\n" ival
+        | String(sval) ->
+            fprintf fout "string\n%s\n" sval
+        | Identifier((id_loc, id_name)) ->
+            fprintf fout "identifier\n%s\n%s\n" id_loc id_name
+        | Bool(bval) ->
+            fprintf fout "%s\n" bval
+        | Let(bindings,body) ->
+            fprintf fout "let\n";
+            fprintf fout "%s\n" (string_of_int (List.length bindings));
+            List.iter (fun ((id_loc, id_name), (type_loc, type_name), exp_opt) ->
+              (
+               match exp_opt with
+               | Some exp ->  fprintf fout "let_binding_init\n"
+               | None -> fprintf fout "let_binding_no_init\n"
+              );
+              fprintf fout "%s\n%s\n%s\n%s\n" id_loc id_name type_loc type_name;
+              (match exp_opt with 
+              | Some exp -> output_exp exp 
+              | None -> ())) bindings;
+              output_exp body
+        | Case(_, exp, cases) ->
+            fprintf fout "case\n";
+            output_exp exp;
+            fprintf fout "%s\n" (string_of_int (List.length cases));
+            List.iter (fun ((id_loc, id_name), (type_loc, type_name), exp) ->
+              fprintf fout "%s\n%s\n%s\n%s\n" id_loc id_name type_loc type_name;
+              output_exp exp) cases
    in
 
    fprintf fout "class_map\n";
