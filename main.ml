@@ -61,11 +61,17 @@ Current class - name of current class, this is needed for type rules involving S
  *)
 type object_environment = (string, static_type) Hashtbl.t
 (* we only care about the types *)
-type method_environment = ((string * string), (static_type list * static_type)) Hashtbl.t
-    
+type method_environment = ((string * string), (static_type list * static_type)) Hashtbl.t 
 
-let empty_object_environment () = Hashtbl.create 255
+
+let empty_object_environment (): object_environment = Hashtbl.create 255
 let m_env:method_environment  = Hashtbl.create 255 
+
+(*
+update with current class when encountering SELF_TYPE
+now we can get access to current class in the recursive typechecking function.
+*)
+let current_class : string ref = ref "" 
 
 type cool_program = cool_class list
 and loc = string (*really an integer*)
@@ -467,7 +473,7 @@ information so you can do the checks more easily.*)
     merge_features parent_features class_features 
   in 
 
-
+    (* PARENT MAP - MAP CHILDREN TO PARENT CLASSES *)
   let parent_map = build_parent_map ast in
   detect_inheritance_cycles parent_map; 
   
@@ -494,7 +500,6 @@ information so you can do the checks more easily.*)
         printf "ERROR: %s: Type-Check: class Bool redefined\n" cloc;
         exit 1
       end;
-
 
 
     (*
@@ -772,6 +777,7 @@ information so you can do the checks more easily.*)
 
     (*iterate over every class and typecheck all features*)
     List.iter (fun((cloc,cname),inherits,features)->
+        current_class := cname; 
         List.iter (fun feat -> 
             match feat with 
             | Attribute((nameloc,name),(dtloc,declared_type),Some(init_exp)) -> (
@@ -793,8 +799,34 @@ information so you can do the checks more easily.*)
                 end
 
             )
-            | _ -> () (*TODO: Typecheck attribute without initializre exp*)
-            | Method _ -> () (*TODO: Typecheck methods*)
+            | Attribute((nameloc,name),(dtloc,declared_type),None) -> (
+                if not (List.mem declared_type all_classes) then begin
+                    printf "ERROR: %s: Type-Check: class %s has attribute %s with unknown type %s\n" nameloc cname name declared_type;
+                    exit 1
+                end
+                )
+            | Method((mloc, mname),formals, (rtloc,return_type), mbody) -> (
+                let o = empty_object_environment () in
+
+                (* add formals to object environment*)
+                List.iter(fun ((floc,fname), (_,ftype)) ->
+                    Hashtbl.add o fname (Class ftype)
+                ) formals;
+                
+                let body_type = typecheck o mbody in
+
+                (* check if body type conforms to declared return type *)
+                let expected_type = if return_type = "SELF_TYPE" then 
+                    SELF_TYPE !current_class 
+                else
+                    Class return_type 
+                in
+
+                if not (is_subtype body_type expected_type) then begin
+                    printf "ERROR: %s: Type-Check: method %s return type should be %s but got %s\n" mloc mname (type_to_str expected_type) (type_to_str body_type);
+                    exit 1
+                end
+            )
         ) features;
     ) ast;
 
@@ -925,33 +957,75 @@ information so you can do the checks more easily.*)
    fprintf fout "%d\n" (List.length all_classes);
 
    List.iter(fun cname ->
-    (* name of class, # attrs, each attr that is a feature*)
-    fprintf fout "%s\n" cname;
-    let features = collect_features parent_map ast cname in 
+        (* name of class, # attrs, each attr that is a feature*)
+        fprintf fout "%s\n" cname;
+        let features = collect_features parent_map ast cname in 
 
-    (* print out number of features for the class *)
-    fprintf fout "%d\n" (List.fold_left (fun acc element -> 
-      match element with 
-      | Attribute _->
-        acc+1
-      | _ -> acc+0
-    ) 0 features);
+        (* print out number of features for the class *)
+        fprintf fout "%d\n" (List.fold_left (fun acc element -> 
+          match element with 
+          | Attribute _->
+            acc+1
+          | _ -> acc+0
+        ) 0 features);
 
-    List.iter (fun attr -> match attr with
-    | Attribute((_,aname),(_,atype),None) ->
-      fprintf fout "no_initializer\n";
-      fprintf fout "%s\n" aname;
-      fprintf fout "%s\n" atype
-    | Attribute((_,aname),(_,atype),(Some init))->  
-      fprintf fout "initializer\n";
-      fprintf fout "%s\n" aname;
-      fprintf fout "%s\n" atype;
-      output_exp init
-    | Method(_,_,_,_)->() (* just doing class map *) 
-    ) features;
+        List.iter (fun attr -> match attr with
+        | Attribute((_,aname),(_,atype),None) ->
+          fprintf fout "no_initializer\n";
+          fprintf fout "%s\n" aname;
+          fprintf fout "%s\n" atype
+        | Attribute((_,aname),(_,atype),(Some init))->  
+          fprintf fout "initializer\n";
+          fprintf fout "%s\n" aname;
+          fprintf fout "%s\n" atype;
+          output_exp init
+        | Method(_,_,_,_)->() (* just doing class map *) 
+        ) features;
    ) all_classes ;
-        
+     
+    fprintf fout "implementation_map\n";
+    fprintf fout "%d\n" (List.length all_classes);
+    (* dont need inherits, we have parent map to get inherited features. *)
+    List.iter (fun ((cloc,cname), _,_ ) -> ( 
+        fprintf fout "%s\n" cname;
 
+        let features = collect_features parent_map ast cname in 
+
+        let methods = List.filter (fun f -> match f with
+        | Method _ -> true
+        | _ -> false
+        ) features in
+
+        fprintf fout "%d\n" (List.length methods);
+
+        List.iter(fun method_feature ->
+            match method_feature with
+            | Method((_,mname), formals, (_,rtype), mbody) -> 
+                    fprintf fout "%s\n" mname;
+                    fprintf fout "%d\n" (List.length formals);
+
+                    List.iter(fun ((_,fname),_)->
+                        fprintf fout "%s\n" fname
+                    ) formals;
+
+                    (*
+                        get base clsas of method (assuming we didnt override it)
+                    *)
+                    let rec find_original_class cname mname = 
+                        match Hashtbl.find_opt parent_map cname with
+                        | None -> cname (* no parent*)
+                        | Some parent -> 
+                                if Hashtbl.mem m_env (parent, mname) then 
+                                    find_original_class parent mname
+                                else
+                                    cname
+                    in
+                    let original_class = find_original_class cname mname in
+                    fprintf fout "%s\n" original_class;
+
+                    output_exp mbody
+        ) methods
+    )) ast; 
    close_out fout;
 end ;;
 main () ;;
