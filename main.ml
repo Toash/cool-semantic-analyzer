@@ -986,7 +986,7 @@ information so you can do the checks more easily.*)
     fprintf fout "implementation_map\n";
     fprintf fout "%d\n" (List.length all_classes);
     (* dont need inherits, we have parent map to get inherited features. *)
-    List.iter (fun ((cloc,cname), _,_ ) -> ( 
+    List.iter (fun (cname) -> ( 
         fprintf fout "%s\n" cname;
 
         let features = collect_features parent_map ast cname in 
@@ -1025,7 +1025,7 @@ information so you can do the checks more easily.*)
 
                     output_exp mbody
         ) methods
-    )) ast; 
+    )) all_classes; 
    close_out fout;
 end ;;
 main () ;;
