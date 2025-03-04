@@ -127,6 +127,7 @@ and exp_kind = (* represents the type and values of expressions*)
   | Bool of string (*true or false*)
   | Let of binding list * exp (*id ends up being the count *)
   | Case of loc * exp * case_element list
+  | Internal of string (* functions for predefined methods *)
 
 let main () = begin 
 
@@ -348,9 +349,25 @@ information so you can do the checks more easily.*)
     let parent_map = Hashtbl.create (List.length ast) in
     List.iter(fun ((_,cname), inherits, _) -> 
       match inherits with
-      | None -> ()
-      | Some(_,pname)-> Hashtbl.add parent_map cname pname
+      (* user declared class in ast that does not have parent *)
+      | None ->
+        (
+          (* printf "%s does not have a parent, assigning Object as its parent.\n" cname; *)
+           Hashtbl.add parent_map cname "Object" 
+        )
+      | Some(_,pname)->
+        (
+          (* printf "%s has a parent named %s\n" cname pname; *)
+           Hashtbl.add parent_map cname pname
+        )
       )ast;
+    (* add object as parent for predefined classes *)
+    List.iter (fun cname -> 
+      match cname with
+      | "IO" | "Int" | "String" | "Bool" -> 
+        Hashtbl.add parent_map cname "Object" 
+      | _ -> ();
+      ) all_classes;
     parent_map 
   in
   let detect_inheritance_cycles parent_map =
@@ -377,6 +394,29 @@ information so you can do the checks more easily.*)
     Hashtbl.iter(fun cname _ -> dfs cname []) parent_map 
   in
 
+
+  (* PREDEFINED METHODS *)
+  (* cheated it a bit and manually put the object methods in alphabetical order *)
+  let object_methods = [
+      Method(("0","abort"),[],("0","Object"),{loc="0";exp_kind=Internal("Object.abort"); static_type= Some(Class("Object"))});
+      Method(("0","copy"),[],("0","SELF_TYPE"),{loc="0";exp_kind=Internal("Object.copy"); static_type= Some(SELF_TYPE("Object"))});
+      Method(("0","type_name"),[],("0","String"),{loc="0";exp_kind=Internal("Object.type_name"); static_type= Some(Class("String"))});
+  ]
+  in
+  let io_methods = [
+      Method(("0","out_string"),[(("0","x"),("0","String"))],("0","SELF_TYPE"),{loc="0";exp_kind=Internal("IO.out_string");static_type=Some(Class("SELF_TYPE"))});
+      Method(("0","out_int"),[(("0","x"),("0","Int"))],("0","SELF_TYPE"),{loc="0";exp_kind=Internal("IO.out_int");static_type=Some(Class("SELF_TYPE"))});
+      Method(("0","in_string"),[],("0","String"),{loc="0";exp_kind=Internal("IO.in_string");static_type=Some(Class("String"))});
+      Method(("0","in_int"),[],("0","Int"),{loc="0";exp_kind=Internal("IO.in_int");static_type=Some(Class("Int"))});
+  ]
+  in
+  let string_methods = [
+
+      Method(("0","length"),[],("0","Int"),{loc="0";exp_kind=Internal("String.length");static_type=Some(Class("Int"))});
+      Method(("0","concat"),[(("0","s"),("0","String"))],("0","String"),{loc="0";exp_kind=Internal("String.concat");static_type=Some(Class("String"))});
+      Method(("0","substr"),[(("0","i"),("0","Int"));(("0","l"),("0","Int"))],("0","String"),{loc="0";exp_kind=Internal("String.substr");static_type=Some(Class("String"))});
+  ]
+  in
   (* 
   given a class name, collect all of its features(including from inherited classes 
   does this by merging the current class and parent class features.
@@ -384,15 +424,25 @@ information so you can do the checks more easily.*)
   *)
   let rec collect_features parent_map ast cname =
     (* get parent class name if there is one *)
-    let parent_features = match Hashtbl.find_opt parent_map cname with
-    | Some parent -> collect_features parent_map ast parent
+    let parent_features = (match Hashtbl.find_opt parent_map cname with
+    | Some parent -> (
+      (* printf "%s has parent %s\n" cname parent; *)
+      collect_features parent_map ast parent
+    )
     | None -> [] (* base class, no parent*)
+    )
     in  
-    let class_features = 
+    let class_features = (*extract features for current class in method *)
       try
+        match cname with 
+        | "Object" -> object_methods;
+        | "IO" -> io_methods;
+        | "String" -> string_methods;
+        | _ -> ( 
         (* extract features from cname *)
         let (_,_,features) = List.find(fun ((_,cname2),_,_) -> cname = cname2) ast in
         features
+        )
       with Not_found -> []
     in
     (* 
@@ -429,6 +479,7 @@ information so you can do the checks more easily.*)
             attr :: merge_features rest child
           end
       | (Method((_,mname),formals,(_,mtype),_) as meth) :: rest ->
+        (
           (* if method exists in child (user explicitly define method in child) *)
           if List.exists (fun (e) -> 
             match e with
@@ -436,42 +487,66 @@ information so you can do the checks more easily.*)
              mname = mname2
             | _ -> false
             ) child then begin
-            
-            List.iter(fun (e) -> 
-              match e with 
-              | Method((mloc2,mname2),formals2,(_,mtype2),_) -> (
-                if mname = mname2 then begin 
-                  (* check if parameters are the same *) 
-                  if List.length formals <> List.length formals2 then begin
-                    printf "ERROR: %s: Type-Check: class %s redefines method %s with different number of parameters!\n" mloc2 cname mname2;
-                    exit 1
-                  end;
-                  (* 
-                  check if parameters are same type
-                  COOL doenst allow out of order formal for overriding. thanks COOL! 
-                  *)
-                  List.iter2 (fun ((_,fname1),(_,ftype1)) ((floc2,fname2),(_,ftype2)) ->
-                    if ftype1 <> ftype2 then begin
-                      printf "ERROR: %s: Type-Check: class %s redefines method %s and changes type of formal!%s\n" floc2 cname mname2 fname2;
+              (* method exists in child *) 
+              List.iter(fun (e) -> 
+                match e with 
+                | Method((mloc2,mname2),formals2,(_,mtype2),_) -> (
+                  if mname = mname2 then begin
+                    (* TYPECHECKING METHODS - inheritance related *) 
+                    (* check if parameters are the same *) 
+                    if List.length formals <> List.length formals2 then begin
+                      printf "ERROR: %s: Type-Check: class %s redefines method %s with different number of parameters!\n" mloc2 cname mname2;
                       exit 1
-                    end
-                  ) formals formals2;
-                  (* check if return type for overriden methods are the same *)
-                  if not (mtype = mtype2) then begin
-                    printf "ERROR: %s: Type-Check: class %s redefines method %s but return types arent the same (%s and %s)\n" mloc2 cname mname2 mtype mtype2;
-                    exit 1
-                  end;
-                end
-              )
-              | _ -> ()
+                    end;
+                    (* 
+                    check if parameters are same type
+                    COOL doenst allow out of order formal for overriding. thanks COOL! 
+                    *)
+                    List.iter2 (fun ((_,fname1),(_,ftype1)) ((floc2,fname2),(_,ftype2)) ->
+                      if ftype1 <> ftype2 then begin
+                        printf "ERROR: %s: Type-Check: class %s redefines method %s and changes type of formal!%s\n" floc2 cname mname2 fname2;
+                        exit 1
+                      end
+                    ) formals formals2;
+                    (* check if return type for overriden methods are the same *)
+                    if not (mtype = mtype2) then begin
+                      printf "ERROR: %s: Type-Check: class %s redefines method %s but return types arent the same (%s and %s)\n" mloc2 cname mname2 mtype mtype2;
+                      exit 1
+                    end;
+                  end
+                  )
+                | _ -> ()
               ) child;
-            merge_features rest child 
-          end
-          else 
-            meth :: merge_features rest child 
-    in
-    merge_features parent_features class_features 
-  in 
+              (* after doing inheritance related checks for methods, merge the features. *)
+              merge_features rest child 
+            end
+            else 
+              (* method not overriden in child, so juts get current definition of method. *)
+              meth :: merge_features rest child 
+        )
+  in
+  let merged_features = merge_features parent_features class_features 
+  in
+  (* we need to take Object methods out, so that we can print it first *)
+  let non_object_internal_methods = List.filter (fun e -> match e with
+  | Method(_,_,_,{exp_kind=Internal(s)}) -> not (String.starts_with ~prefix:"Object." s)
+  | _ -> false
+  ) merged_features
+  in
+  let sorted_internal_methods = List.sort (fun m1 m2 ->
+    match m1, m2 with 
+    | Method(_,_,_,{exp_kind=Internal(meth1)}), Method(_,_,_,{exp_kind=Internal(meth2)})->
+      String.compare meth1 meth2
+    | _ -> 0
+  ) non_object_internal_methods
+  in
+  let non_internal_methods = List.filter (fun e -> match e with
+  | Method(_,_,_,{exp_kind=Internal(_)}) -> false
+  | _ -> true
+  ) merged_features 
+  in
+  object_methods @ sorted_internal_methods @ non_internal_methods  
+  in
 
     (* PARENT MAP - MAP CHILDREN TO PARENT CLASSES *)
   let parent_map = build_parent_map ast in
@@ -678,6 +753,21 @@ information so you can do the checks more easily.*)
        Update the method environment with the 
             Class name, method name, list of formal types, and return type
     *)
+    (*
+    let object_methods = [
+        Method(("0","abort"),[],("0","Object"),{loc="0";exp_kind=Block([]); static_type= Some(Class("Object"))});
+        Method(("0","type_name"),[],("0","String"),{loc="0";exp_kind=Block([]); static_type= Some(Class("String"))});
+        Method(("0","copy"),[],("0","SELF_TYPE"),{loc="0";exp_kind=Block([]); static_type= Some(SELF_TYPE("Object"))});
+    ]
+          in
+    List.iter (fun m -> 
+        match m with
+        | Method((_, mname), formals, (_, rtype), _) ->
+            let formal_types = List.map (fun _ -> Class "Object") formals in
+            Hashtbl.add m_env ("Object", mname) (formal_types, if rtype = "SELF_TYPE" then SELF_TYPE("Object") else Class rtype);
+        | _ -> ()
+    ) object_methods;
+    *)
     List.iter (fun((_,cname),_,features) -> 
         (*loop through features for a class *)
        List.iter(fun feat -> 
@@ -845,7 +935,11 @@ information so you can do the checks more easily.*)
            exit 1
        )
        | Some(Class(c)) -> fprintf fout "%s\n" c
-       | Some(SELF_TYPE(c)) -> failwith "need to implement self type... :(");
+       (* | Some(SELF_TYPE(c)) -> fprintf fout "%s\n" !current_class; *)
+       | Some(SELF_TYPE(c)) -> fprintf fout "SELF_TYPE\n";
+       );
+       
+        
 
        
         match e.exp_kind with
@@ -951,8 +1045,14 @@ information so you can do the checks more easily.*)
             List.iter (fun ((id_loc, id_name), (type_loc, type_name), exp) ->
               fprintf fout "%s\n%s\n%s\n%s\n" id_loc id_name type_loc type_name;
               output_exp exp) cases
+        | Internal(meth)->(
+            (* type? *)
+            fprintf fout "internal\n";
+            fprintf fout "%s\n" meth;
+        )
    in
 
+   (* CLASS MAP*)
    fprintf fout "class_map\n";
    fprintf fout "%d\n" (List.length all_classes);
 
@@ -982,7 +1082,9 @@ information so you can do the checks more easily.*)
         | Method(_,_,_,_)->() (* just doing class map *) 
         ) features;
    ) all_classes ;
-     
+    
+   
+   (* IMPLEMENTATION MAP*)
     fprintf fout "implementation_map\n";
     fprintf fout "%d\n" (List.length all_classes);
     (* dont need inherits, we have parent map to get inherited features. *)
@@ -1001,6 +1103,7 @@ information so you can do the checks more easily.*)
         List.iter(fun method_feature ->
             match method_feature with
             | Method((_,mname), formals, (_,rtype), mbody) -> 
+                    (* printf "%s\n" mname; *)
                     fprintf fout "%s\n" mname;
                     fprintf fout "%d\n" (List.length formals);
 
@@ -1014,18 +1117,28 @@ information so you can do the checks more easily.*)
                     let rec find_original_class cname mname = 
                         match Hashtbl.find_opt parent_map cname with
                         | None -> cname (* no parent*)
+                        (* look at parent for cname *)
                         | Some parent -> 
-                                if Hashtbl.mem m_env (parent, mname) then 
-                                    find_original_class parent mname
-                                else
-                                    cname
+                              (* metohd is defiined in parent *)
+                              (* go up the inheritance tree see if its farthur up, or if its just definde in parent*)
+                              (* for example: A->B->C->Object!*)
+                              if List.exists (fun f->match f with 
+                                | Method((_,mn),_,_,_) -> mn = mname
+                                | _ -> false
+                              ) (collect_features parent_map ast parent) then
+                                find_original_class parent mname
+                              else
+                                cname
+
                     in
                     let original_class = find_original_class cname mname in
                     fprintf fout "%s\n" original_class;
 
                     output_exp mbody
+            | _ -> failwith "whattt"
         ) methods
     )) all_classes; 
+    Hashtbl.iter (fun key value -> printf "Class %s has parent %s\n" key value) parent_map; 
    close_out fout;
 end ;;
 main () ;;
