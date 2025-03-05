@@ -825,12 +825,14 @@ let rec is_subtype t1 t2 =
     let rec typecheck (o: object_environment) (exp : exp) : static_type =
         let static_type = match exp.exp_kind with
         | Identifier((vloc,vname)) -> 
-            if Hashtbl.mem o vname then
+            if vname = "self" then
+                SELF_TYPE !current_class
+            else if Hashtbl.mem o vname then
                 (
                 Hashtbl.find o vname;
                 )
             else begin
-                printf "ERROR: %s Type-Check: undeclared variable %s\n" vloc, vname;
+                printf "ERROR: %s Type-Check: undeclared variable %s\n" vloc vname;
                 exit 1
             end
         | Assign((var_loc, var_name), e1) ->
@@ -1391,7 +1393,7 @@ let rec is_subtype t1 t2 =
                         match Hashtbl.find_opt parent_map cname with
                         | None -> cname (* no parent*)
                         (* look at parent for cname *)
-                        | Some parent -> 
+                        | Some parent -> (
                               (* metohd is defiined in parent *)
                               (* go up the inheritance tree see if its farthur up, or if its just definde in parent*)
                               (* for example: A->B->C->Object!*)
@@ -1402,10 +1404,28 @@ let rec is_subtype t1 t2 =
                                 find_original_class parent mname
                               else
                                 cname
-
+                        )
                     in
-                    let original_class = find_original_class cname mname in
-                    fprintf fout "%s\n" original_class;
+                   (* dont consider super methods *) 
+                    let direct_features = 
+                      try 
+                        let ((_,_),_,features) = List.find(fun  ((_,cname2),_,_) -> cname = cname2) ast in
+                        features
+                      with Not_found -> []
+                    in
+                  let has_method_already = List.exists (fun f -> (
+                    match f with 
+                    | Method((_,mname2),_,_,_) ->mname = mname2 
+                    | _ -> false
+                  )) direct_features
+                  in
+                    if has_method_already then begin 
+                      fprintf fout "%s\n" cname;
+                    end
+                    else begin
+                      let original_class = find_original_class cname mname in
+                      fprintf fout "%s\n" original_class;
+                    end;
 
                     output_exp mbody
             | _ -> failwith "whattt"
@@ -1493,6 +1513,8 @@ let rec is_subtype t1 t2 =
   printf "%s features for class %s\n" (string_of_int(List.length features)) cname;
   )
     ) ast; *)
+    (* Hashtbl.iter (fun key value -> Printf.printf "Parent of %s is %s\n" key value) parent_map; *)
+
    close_out fout;
 end ;;
 main () ;;
