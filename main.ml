@@ -556,6 +556,7 @@ information so you can do the checks more easily.*)
     loop through ast to check for class related errors
  *)
   List.iter (fun ((cloc,cname),inherits,features) ->
+    current_class := cname;
     (*
       Ensure that we dont redefine IO or String
     *)
@@ -626,6 +627,7 @@ information so you can do the checks more easily.*)
     Typechecking methods
   *)
   List.iter (fun((cloc,cname),_,current_features) ->
+        current_class := cname;
         let features = collect_features parent_map ast cname in
         let seen_methods = Hashtbl.create (List.length features) in
         let seen_attributes = Hashtbl.create (List.length features) in
@@ -769,6 +771,7 @@ information so you can do the checks more easily.*)
     ) object_methods;
     *)
     List.iter (fun((_,cname),_,features) -> 
+      current_class := cname;
         (*loop through features for a class *)
        List.iter(fun feat -> 
            match feat with
@@ -1057,6 +1060,8 @@ information so you can do the checks more easily.*)
    fprintf fout "%d\n" (List.length all_classes);
 
    List.iter(fun cname ->
+
+        current_class := cname;
         (* name of class, # attrs, each attr that is a feature*)
         fprintf fout "%s\n" cname;
         let features = collect_features parent_map ast cname in 
@@ -1089,6 +1094,8 @@ information so you can do the checks more easily.*)
     fprintf fout "%d\n" (List.length all_classes);
     (* dont need inherits, we have parent map to get inherited features. *)
     List.iter (fun (cname) -> ( 
+        
+        current_class := cname;
         fprintf fout "%s\n" cname;
 
         let features = collect_features parent_map ast cname in 
@@ -1138,7 +1145,88 @@ information so you can do the checks more easily.*)
             | _ -> failwith "whattt"
         ) methods
     )) all_classes; 
-    Hashtbl.iter (fun key value -> printf "Class %s has parent %s\n" key value) parent_map; 
+    (* Hashtbl.iter (fun key value -> printf "Class %s has parent %s\n" key value) parent_map;  *)
+    (* PARENT MAP *)
+    fprintf fout "parent_map\n";
+    fprintf fout "%s\n" (string_of_int (Hashtbl.length parent_map));
+    (* 
+    print hashtbl where keys are in alphabetical order
+      gotta extract keys into a list, sort the list then iter through list and get the values from those keys.
+    *)
+    let keys = Hashtbl.fold (fun key _ acc -> key :: acc) parent_map [] in
+    let sorted_keys = List.sort String.compare keys in
+    List.iter (fun key -> fprintf fout "%s\n%s\n" key (Hashtbl.find parent_map key)) sorted_keys;
+
+    (*
+    ANNOTATED AST
+    *)
+
+    (* let find_features_for_class cname = List.iter(fun ((_,cname2),_,features) -> (
+      if cname = cname2 then
+        features
+    )) 
+    in *)
+    fprintf fout "%s\n" (string_of_int(List.length ast));
+    List.iter (fun ((cloc,cname),inherits,features)-> (
+      (* printf "%s\n" cname; *)
+      fprintf fout "%s\n" cloc;
+      fprintf fout "%s\n" cname;
+
+      (* i dont know why, but when you remove the parantehesis aroud 
+      this match expressoin, the output changes *)
+      (match inherits with
+      | Some(ploc,pname) -> (
+        fprintf fout "inherits\n";
+        fprintf fout "%s\n" ploc;
+        fprintf fout "%s\n" pname;
+      )
+      | None -> (
+        fprintf fout "no_inherits\n";
+      );
+      );
+      (* printf "%s features for class %s\n" (string_of_int(List.length features)) cname; *)
+
+      fprintf fout "%s\n" (string_of_int(List.length features));
+      List.iter(fun feature ->(
+        match feature with 
+        | Attribute((aloc,aname),(tloc,tname),None) ->(
+          fprintf fout "attribute_no_init\n";
+          fprintf fout "%s\n" aloc;
+          fprintf fout "%s\n" aname;
+          fprintf fout "%s\n" tloc;
+          fprintf fout "%s\n" tname;
+        )
+        | Attribute((aloc,aname),(tloc,tname),(Some finit)) ->
+          fprintf fout "attribute_init\n";
+          fprintf fout "%s\n" aloc;
+          fprintf fout "%s\n" aname;
+          fprintf fout "%s\n" tloc;
+          fprintf fout "%s\n" tname;
+          output_exp finit
+        | Method((mloc,mname), formals, (tloc,tname), mbody) ->
+          fprintf fout "method\n";
+          fprintf fout "%s\n" mloc;
+          fprintf fout "%s\n" mname;
+          fprintf fout "%d\n" (List.length formals);
+          List.iter (fun ((floc,fname), (ftloc,ftname)) ->
+            fprintf fout "%s\n" floc;
+            fprintf fout "%s\n" fname;
+            fprintf fout "%s\n" ftloc;
+            fprintf fout "%s\n" ftname;
+          ) formals;
+          fprintf fout "%s\n" tloc;
+          fprintf fout "%s\n" tname;
+          output_exp mbody
+      )) features;
+                        
+    )) ast;
+
+  (* 
+            test if ast is the same here
+  List.iter (fun ((_,cname),_,features) -> (
+  printf "%s features for class %s\n" (string_of_int(List.length features)) cname;
+  )
+    ) ast; *)
    close_out fout;
 end ;;
 main () ;;
