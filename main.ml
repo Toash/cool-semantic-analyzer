@@ -5,7 +5,6 @@ https://www.youtube.com/watch?v=Wa9zMygcv_M&ab_channel=WestleyWeimer
 
 open Printf
 
-
 (* static type of cool expression*)
 type static_type = 
 | Class of string (*Int, or Object etc*)
@@ -22,7 +21,7 @@ Objects - mapping from object identifiers (names) to types!
     * for example, in a let expression we need the type of the variable so that we can...
         * check if hte initializer expression has the right type
         * typecheck the let body (assuming we use the variable in it.)
-
+(we use collect_features and filter to get methods)
 Methods - mapping from (Class C, method f) to signature (check page 22 of CRM)
     *note - the signature of the method is the tuple of types.
     *example - (t1,t2,...tn-1,tn)
@@ -33,12 +32,9 @@ Methods - mapping from (Class C, method f) to signature (check page 22 of CRM)
 Current class - name of current class, this is needed for type rules involving SELF_TYPE
  *)
 type object_environment = (string, static_type) Hashtbl.t
-(* we only care about the types *)
-type method_environment = ((string * string), (static_type list * static_type)) Hashtbl.t 
 
 
 let empty_object_environment (): object_environment = Hashtbl.create 255
-let m_env:method_environment  = Hashtbl.create 255 
 
 (*
 update with current class when encountering SELF_TYPE
@@ -720,43 +716,6 @@ information so you can do the checks more easily.*)
   
    (* DONE WITH ERROR CHECKING *)
 
-
-    (* 
-       BUILD THE METHOD ENVIRONMENT
-       loop over ast, (each class)
-       for each class, loop throuhg methods
-       Update the method environment with the 
-            Class name, method name, list of formal types, and return type
-    *)
-    (*
-    let object_methods = [
-        Method(("0","abort"),[],("0","Object"),{loc="0";exp_kind=Block([]); static_type= Some(Class("Object"))});
-        Method(("0","type_name"),[],("0","String"),{loc="0";exp_kind=Block([]); static_type= Some(Class("String"))});
-        Method(("0","copy"),[],("0","SELF_TYPE"),{loc="0";exp_kind=Block([]); static_type= Some(SELF_TYPE("Object"))});
-    ]
-          in
-    List.iter (fun m -> 
-        match m with
-        | Method((_, mname), formals, (_, rtype), _) ->
-            let formal_types = List.map (fun _ -> Class "Object") formals in
-            Hashtbl.add m_env ("Object", mname) (formal_types, if rtype = "SELF_TYPE" then SELF_TYPE("Object") else Class rtype);
-        | _ -> ()
-    ) object_methods;
-    *)
-    List.iter (fun((_,cname),_,features) -> 
-      current_class := cname;
-      List.iter(fun feat -> 
-        match feat with
-        | Method((_,mname),formals, (_,rtype),_) -> (
-            let formal_types = List.map (fun ((_,_),(_,ftype)) ->
-              if ftype = "SELF_TYPE" then SELF_TYPE cname else Class ftype
-            ) formals in
-            let return_type = if rtype = "SELF_TYPE" then SELF_TYPE cname else Class rtype in
-            Hashtbl.add m_env (cname, mname) (formal_types, return_type)
-        ) 
-        | _ -> ()
-      ) features 
-    ) ast;
     (* return true if t1 is a subtype of t2 *)
 let rec is_subtype t1 t2 = 
   (match t1, t2 with
@@ -814,12 +773,6 @@ let rec is_subtype t1 t2 =
    1. Iterate over every class
    2. Iterate over every feature. 
    3. Typecheck the expressoins in that feature.
-
-   We implement our expression typechecking procedure
-   by reading the typing rules from the CRM or class notes.
-
-   Every line in a typing rule corresponds to a line in typechecking code.
-        ( will probably be tested on this :/)
    *)
     
     let rec typecheck (o: object_environment) (exp : exp) : static_type =
@@ -1447,11 +1400,6 @@ let rec is_subtype t1 t2 =
     ANNOTATED AST
     *)
 
-    (* let find_features_for_class cname = List.iter(fun ((_,cname2),_,features) -> (
-      if cname = cname2 then
-        features
-    )) 
-    in *)
     fprintf fout "%s\n" (string_of_int(List.length ast));
     List.iter (fun ((cloc,cname),inherits,features)-> (
       (* printf "%s\n" cname; *)
