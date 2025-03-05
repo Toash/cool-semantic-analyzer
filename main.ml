@@ -33,15 +33,6 @@ let type_to_str t = match t with
 | Class(x) -> x
 | SELF_TYPE(c) -> "SELF_TYPE"
 
-(* liskov substitution principle*)
-(* Int <= Object *)
-(* String <= String *)
-let rec is_subtype t1 t2 = 
-  match t1, t2 with
-  | Class(x), Class(y) when x = y -> true
-  | Class(x), Class("Object") -> true
-  | Class(x), Class(y) -> false (*TODO: check parent map*)
-  | _,_ -> false (* TODO: SELF_TYPE shenanigans *)
 (*
 typechecking will need O, M, C
 type environment consists of three parts:
@@ -786,6 +777,40 @@ information so you can do the checks more easily.*)
             | _ -> ()
         ) features 
     ) ast;
+
+    (* return true if t1 is a subtype of t2 *)
+let rec is_subtype t1 t2 = 
+  (match t1, t2 with
+  | Class(x), Class(y) when x = y -> true
+  | Class(x), Class("Object") -> true
+  | Class(x), Class(y) -> 
+    (* recursively go up inheritance tree to see if x is subtype of y *)
+    (try 
+      let parent = Hashtbl.find parent_map x in
+      is_subtype (Class parent) t2
+    with Not_found -> false)
+  | SELF_TYPE(c1), SELF_TYPE(c2) when c1 = c2 -> true
+  | SELF_TYPE(c1), Class(c2) -> is_subtype (Class c1) (Class c2)
+  | Class(c1), SELF_TYPE(c2) -> is_subtype (Class c1) (Class c2)
+  | _,_ -> false
+  )
+  in
+
+  (* can be eithre then or else, return lub *)
+  let rec least_upper_bound t1 t2 =
+    if is_subtype t1 t2 then t2
+    else if is_subtype t2 t1 then t1
+    else match t1, t2 with
+      (* not subtype, go up inheritance tree to check again*)
+      | Class(c1), Class(c2) ->
+          let parent1 = Hashtbl.find parent_map c1 in
+          let parent2 = Hashtbl.find parent_map c2 in
+          least_upper_bound (Class parent1) (Class parent2)
+      | SELF_TYPE(c1), SELF_TYPE(c2) when c1 = c2 -> SELF_TYPE(c1)
+      | SELF_TYPE(c1), Class(c2) -> least_upper_bound (Class c1) (Class c2)
+      | Class(c1), SELF_TYPE(c2) -> least_upper_bound (Class c1) (Class c2)
+      | _ -> failwith "unexpected types in least_upper_bound"
+  in
    (* 
    TIME TO DO EXPRESSION TYPECHECKING 
    1. Iterate over every class
@@ -801,8 +826,215 @@ information so you can do the checks more easily.*)
     
     let rec typecheck (o: object_environment) (exp : exp) : static_type =
         let static_type = match exp.exp_kind with
+        | Identifier((vloc,vname)) -> 
+            if Hashtbl.mem o vname then
+                (
+                Hashtbl.find o vname;
+                )
+            else begin
+                printf "ERROR: %s Type-Check: undeclared variable %s\n" vloc, vname;
+                exit 1
+            end
+        | Assign((var_loc, var_name), e1) ->
+          if Hashtbl.mem o var_name then
+            let t0 = Hashtbl.find o var_name in
+            let t = typecheck o e1 in
+            if is_subtype t t0 then
+                t0
+            else begin
+                printf "ERROR: %s: Type-Check: type %s does not conform to declared type %s in assignment\n" exp.loc (type_to_str t) (type_to_str t0);
+                exit 1
+            end
+          else begin
+            printf "ERROR: %s: Type-Check: undeclared variable %s\n" var_loc var_name;
+            exit 1
+          end
+        | Bool(_) -> Class "Bool"
         | Integer(i) -> (Class "Int")
-        | Plus(e1, e2) ->
+        | String(s) -> (Class "String")
+        | New((_, tname)) ->
+        if tname = "SELF_TYPE" then
+            SELF_TYPE !current_class
+        else
+            Class tname
+        | Dynamic_Dispatch(e0, (f_loc, f_name), args) ->
+        (* receiver expression
+          is the evaluatoin of calling th emethod on receiver.
+        *)
+        let t0 = typecheck o e0 in 
+        let arg_types = List.map (typecheck o) args in (* typecheck the arguments *) 
+        let t00 = match t0 with
+          (* if SELF_TYPE, get the current class that we are keeping track of. (hopefully)*)
+          | SELF_TYPE _ -> Class !current_class
+          | _ -> t0
+        in
+        (* look up method signature *)
+        let (formal_types, return_type) = 
+          let get_class_name t = match t with
+            | Class(c) -> c
+            | _ -> failwith "unexpected type"
+          in
+          try Hashtbl.find m_env (get_class_name t00, f_name)
+          with Not_found -> 
+            printf "ERROR: %s: Type-Check: method %s not found in class %s\n" f_loc f_name (type_to_str t00);
+            exit 1
+        in
+        if List.length formal_types <> List.length arg_types then begin
+          printf "ERROR: %s: Type-Check: method %s called with wrong number of arguments\n" f_loc f_name;
+          exit 1
+        end;
+        (* check if method types line up *)
+        List.iter2 (fun t arg_t ->
+          if not (is_subtype arg_t t) then begin
+            printf "ERROR: %s: Type-Check: argument type %s does not conform to formal type %s\n" f_loc (type_to_str arg_t) (type_to_str t);
+            exit 1
+          end
+        ) formal_types arg_types;
+        let t_return = match return_type with
+          | SELF_TYPE _ -> t0
+          | _ -> return_type
+        in
+        t_return
+        (* Call class "x"s implementatoin of the method *)
+        | Static_Dispatch(e0, (t_loc, t_name), (f_loc, f_name), args) ->
+            let t0 = typecheck o e0 in
+            let t = Class t_name in
+            if not (is_subtype t0 t) then begin
+                printf "ERROR: %s: Type-Check: type %s does not conform to declared type %s in static dispatch\n" exp.loc (type_to_str t0) (type_to_str t);
+                exit 1
+            end;
+            let arg_types = List.map (typecheck o) args in
+            let (formal_types, return_type) = 
+              try Hashtbl.find m_env (t_name, f_name)
+              with Not_found -> 
+                printf "ERROR: %s: Type-Check: method %s not found in class %s\n" f_loc f_name t_name;
+                exit 1
+            in
+            if List.length formal_types <> List.length arg_types then begin
+              printf "ERROR: %s: Type-Check: method %s called with wrong number of arguments\n" f_loc f_name;
+              exit 1
+            end;
+            List.iter2 (fun t arg_t ->
+              if not (is_subtype arg_t t) then begin
+                printf "ERROR: %s: Type-Check: argument type %s does not conform to formal type %s\n" f_loc (type_to_str arg_t) (type_to_str t);
+                exit 1
+              end
+            ) formal_types arg_types;
+            let t_return = match return_type with
+              | SELF_TYPE _ -> t0
+              | _ -> return_type
+            in
+            t_return
+        | Self_Dispatch((id_loc, id_name), exp_list) -> failwith "self dispathc not handled"
+        | If(e1, e2, e3) ->
+            let t1 = typecheck o e1 in
+              if t1 <> Class "Bool" then begin
+                  printf "ERROR: %s: Type-Check: condition in if expression must be Bool, but got %s\n" e1.loc (type_to_str t1);
+                  exit 1
+              end;
+              let t2 = typecheck o e2 in
+              let t3 = typecheck o e3 in
+              
+              least_upper_bound t2 t3
+        | Block(exp_list) ->
+          (* 
+          the type of a sequence is the last expression in it 
+          so we are juts going to recursively call this until we get down to one 
+            expression, and return that as its type.
+          *)
+          let rec typecheck_sequence exps =
+            match exps with
+            | [] -> failwith "empty block"
+            | [e] -> typecheck o e
+            | e :: rest -> 
+                let _ = typecheck o e in
+                typecheck_sequence rest
+          in
+          typecheck_sequence exp_list
+
+        | Let(bindings, body) ->
+          List.iter (fun ((vloc, vname), (tloc, tname), init) -> 
+              (*T0'*)
+              let declared_type = if tname = "SELF_TYPE" then SELF_TYPE !current_class else Class tname in
+              match init with 
+              | None -> 
+                  Hashtbl.add o vname declared_type
+              | Some exp -> 
+                  (*T1, we try to prove that exp is of a type T1*)
+                  let init_type = typecheck o exp in 
+                  (* T1 <= T0' *)
+                  if is_subtype init_type declared_type then
+                      Hashtbl.add o vname declared_type
+                  else begin
+                      printf "ERROR: %s: Type-Check: initializer for %s should be %s not %s\n" vloc vname tname (type_to_str init_type);
+                      exit 1
+                  end
+          ) bindings;
+          (* we are now passing the extended objcet environment
+                with this extended object environet, check if the 
+                  body resolves to a valid type. *)
+          let body_type = typecheck o body in
+          (* important to remove mappings from object environment *)
+          List.iter (fun ((_, vname), (_, _), _) -> Hashtbl.remove o vname) bindings;
+          body_type
+
+        | Case(_, e0, cases) ->
+          let t0 = typecheck o e0 in
+          let case_types = List.map (fun ((_, x), (_, t), e) ->
+              (* type check each case body with its corresponding variable in extended object map *)
+              let case_type = if t = "SELF_TYPE" then SELF_TYPE !current_class else Class t in
+              Hashtbl.add o x case_type;
+              let t0i = typecheck o e in
+              Hashtbl.remove o x;
+              t0i
+          ) cases in
+          let rec least_upper_bound_list types =
+            match types with
+            | [] -> failwith "empty case!"
+            | [t] -> t
+            | t1 :: t2 :: rest -> least_upper_bound_list ((least_upper_bound t1 t2) :: rest)
+          in
+          least_upper_bound_list case_types
+        | While(e1, e2) ->
+          let t1 = typecheck o e1 in
+          if t1 <> Class "Bool" then begin
+              printf "ERROR: %s: Type-Check: condition in while expression must be Bool, but got %s\n" e1.loc (type_to_str t1);
+              exit 1
+          end;
+          let _ = typecheck o e2 in
+          Class "Object"
+        | IsVoid(e1)->
+          let _ = typecheck o e1 in
+          Class("Bool")
+        | Not(e)->
+          let t = typecheck o e in
+          if t <> Class("Bool") then begin
+            printf "ERROR: %s: Type-Check: not expression must be Bool, but got %s\n" e.loc (type_to_str t);
+            exit 1
+          end;
+          Class("Bool")
+        | LessThan(e1,e2) | LessThanEqual(e1,e2) ->
+            let t1 = typecheck o e1 in
+            if t1 <> (Class "Int") then begin
+                printf "ERROR: %s: Type-Check: comparison on %s instead of Int\n" e1.loc (type_to_str t1);
+                exit 1
+            end;
+            (*[2]*)
+            let t2 = typecheck o e2 in
+            if t2 <> (Class "Int") then begin
+                printf "ERROR: %s: Type-Check: comparison on %s instead of Int\n" e2.loc (type_to_str t2);
+                exit 1
+            end;
+            Class("Bool");
+        | Negate(e1) ->
+          let t1 = typecheck o e1 in
+          if t1 <> (Class "Int") then begin
+            printf "ERROR: %s: Type-Check: negate on %s instead of Int\n" e1.loc (type_to_str t1);
+            exit 1
+          end 
+          else
+            (Class "Int")
+        | Times(e1,e2) | Plus(e1, e2) | Minus(e1,e2) | Divide(e1,e2) ->
             (
             (*
                 O |- e1 : Int       [1]
@@ -814,115 +1046,103 @@ information so you can do the checks more easily.*)
             (*[1]*)
             let t1 = typecheck o e1 in
             if t1 <> (Class "Int") then begin
-                printf "ERROR: %s: Type-Check: adding %s instead of Int\n" exp.loc (type_to_str t1);
+                printf "ERROR: %s: Type-Check: arithmetic on %s instead of Int\n" exp.loc (type_to_str t1);
                 exit 1
             end;
             (*[2]*)
              let t2 = typecheck o e2 in
             if t2 <> (Class "Int") then begin
-                printf "ERROR: %s: Type-Check: adding %s instead of Int\n" exp.loc (type_to_str t2);
+                printf "ERROR: %s: Type-Check: arithmetic on %s instead of Int\n" exp.loc (type_to_str t2);
                 exit 1
             end;
             (*[3]*)
             (Class "Int");
             )
-        | Identifier((vloc,vname)) -> 
-            if Hashtbl.mem o vname then
-                (
-                Hashtbl.find o vname;
-                )
-            else begin
-                printf "ERROR: %s Type-Check: undeclared variable %s\n" vloc, vname;
-                exit 1
-            end
-        | Let(bindings,body) ->
-            (*
-            This is the extend O with x having type T0 part
-            we will add the declare variable to object environment,
-            then type chcek the expression with this "extended" environment.
+        | Equal(e1, e2) ->
+          let t1 = typecheck o e1 in
+          let t2 = typecheck o e2 in
+          let is_primitive_type t = match t with
+              | Class("Int") | Class("String") | Class("Bool") -> true
+              | _ -> false
+          in
+          if (is_primitive_type t1 || is_primitive_type t2) && t1 <> t2 then begin
+              printf "ERROR: %s: Type-Check: cannot compare %s with %s\n" exp.loc (type_to_str t1) (type_to_str t2);
+              exit 1
+          end;
+          Class("Bool")
+        | Internal(e) ->
+        match e with 
+          | "Object.abort" -> Class("Object")
+          | "Object.type_name" -> Class("String")
+          | "Object.copy" -> SELF_TYPE("Object")
+          | "IO.out_string" -> SELF_TYPE("IO")
+          | "IO.out_int" -> SELF_TYPE("IO")
+          | "IO.in_string" -> Class("String")
+          | "IO.in_int" -> Class("Int")
+          | "String.length" -> Class("Int")
+          | "String.concat" -> Class("String")
+          | "String.substr" -> Class("String")
+          | _ -> failwith "wat internal method is that?\n"
+        in 
 
-            After doing so, we remove x having type T0 from typing environment.
-            *)
-            List.iter (fun ((vloc,vname),(tloc,tname),init) -> 
-                match init with 
-                | None -> (
-                    (* add variable to current scope *)
-                    Hashtbl.add o vname (Class tname) (* TODO: SELF_TYPE*)
-                )
-            ) bindings;
-            (* typecheck let body with bound varible added to the object environment*)
-            let body_type = typecheck o body in 
-
-            (*
-            IMPORTANT - remove object identifier(s)
-            This is where mutable data can become tricky to debug :/
-            *)
-            List.iter( fun((_,vname),(_,_),_) ->
-                Hashtbl.remove o vname
-            ) bindings;
-
-            body_type
-        in        
         (* annotate the AST with the new found static type! *)
         exp.static_type <- Some(static_type);
         static_type
     in
-
+    (* Loops over attributes for Class, and populates object environment.*)
+    let build_object_environment_for_class parent_map ast cname =
+      let o = empty_object_environment () in
+      let features = collect_features parent_map ast cname in
+      List.iter (fun feature ->
+        match feature with
+        | Attribute((_, aname), (_, tname), _) ->
+          let attr_type = if tname = "SELF_TYPE" then SELF_TYPE cname else Class tname in
+          Hashtbl.add o aname attr_type
+        | _ -> ()
+      ) features;
+      o
+    in
     (*iterate over every class and typecheck all features*)
     List.iter (fun((cloc,cname),inherits,features)->
-        current_class := cname; 
-        List.iter (fun feat -> 
-            match feat with 
-            | Attribute((nameloc,name),(dtloc,declared_type),Some(init_exp)) -> (
-                (* 
-                   x : Int <- 5+3 
-                   1. typecheck initializer expression
-                   2. ensure that it conforms to the variable type. 
-                *)
-                (* TODO: THIS IS WRONG, CONSIDER INHERITED FEATURES IN OBJECT ENVIRONMENT*)
-                let o = empty_object_environment () in
-
-                let init_type = typecheck o init_exp in 
-                if is_subtype init_type (Class declared_type) then
-                    (*good*)
-                    ()
-                else begin
-                    printf "ERROR: %s: Type-Check initializer for %s should be %s not %s\n" nameloc name declared_type (type_to_str init_type);
-                    exit 1
-                end
-
-            )
-            | Attribute((nameloc,name),(dtloc,declared_type),None) -> (
-                if not (List.mem declared_type all_classes) then begin
-                    printf "ERROR: %s: Type-Check: class %s has attribute %s with unknown type %s\n" nameloc cname name declared_type;
-                    exit 1
-                end
-                )
-            | Method((mloc, mname),formals, (rtloc,return_type), mbody) -> (
-                let o = empty_object_environment () in
-
-                (* add formals to object environment*)
-                List.iter(fun ((floc,fname), (_,ftype)) ->
-                    Hashtbl.add o fname (Class ftype)
-                ) formals;
-                
-                let body_type = typecheck o mbody in
-
-                (* check if body type conforms to declared return type *)
-                let expected_type = if return_type = "SELF_TYPE" then 
-                    SELF_TYPE !current_class 
-                else
-                    Class return_type 
-                in
-
-                if not (is_subtype body_type expected_type) then begin
-                    printf "ERROR: %s: Type-Check: method %s return type should be %s but got %s\n" mloc mname (type_to_str expected_type) (type_to_str body_type);
-                    exit 1
-                end
-            )
-        ) features;
-    ) ast;
-
+    current_class := cname; 
+    let o = build_object_environment_for_class parent_map ast cname in
+    List.iter (fun feat -> 
+        match feat with 
+        | Attribute((nameloc,name),(dtloc,declared_type),Some(init_exp)) -> (
+            let expected_type = if declared_type = "SELF_TYPE" then SELF_TYPE !current_class else Class declared_type in
+            Hashtbl.add o "self" (SELF_TYPE !current_class);
+            let init_type = typecheck o init_exp in
+            Hashtbl.remove o "self";
+            if not (is_subtype init_type expected_type) then begin
+                printf "ERROR: %s: Type-Check: initializer for %s should be %s not %s\n" nameloc name (type_to_str expected_type) (type_to_str init_type);
+                exit 1
+            end
+        )
+        | Attribute((nameloc,name),(dtloc,declared_type),None) -> (
+            let expected_type = if declared_type = "SELF_TYPE" then SELF_TYPE !current_class else Class declared_type in
+            if not (List.mem declared_type all_classes) then begin
+                printf "ERROR: %s: Type-Check: class %s has attribute %s with unknown type %s\n" dtloc cname name declared_type;
+                exit 1
+            end
+        )
+        (* the high level idea is that  we need the method formals and class attributes 
+      in scope when typechecking the  method body. *)
+        | Method((mloc, mname),formals, (rtloc,return_type), mbody) -> (
+            let o = build_object_environment_for_class parent_map ast cname in
+            Hashtbl.add o "self" (SELF_TYPE !current_class);
+            List.iter (fun ((floc,fname), (_,ftype)) ->
+                Hashtbl.add o fname (if ftype = "SELF_TYPE" then SELF_TYPE !current_class else Class ftype)
+            ) formals;
+            let body_type = typecheck o mbody in
+            let expected_type = if return_type = "SELF_TYPE" then SELF_TYPE !current_class else Class return_type in
+            if not (is_subtype body_type expected_type) then begin
+                printf "ERROR: %s: Type-Check: method %s return type should be %s but got %s\n" mloc mname (type_to_str expected_type) (type_to_str body_type);
+                exit 1
+            end
+        )
+        | _ -> ()
+    ) features;
+  ) ast;
    (* emit cl-type file*)
    let cmname = (Filename.chop_extension fname) ^ ".cl-type" in
    let fout = open_out cmname in
