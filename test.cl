@@ -8,5 +8,7 @@ class Main {
 
 
 class ABruh {
+
+	a:ABruh;
 };
 

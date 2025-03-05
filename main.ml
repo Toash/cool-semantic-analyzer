@@ -851,45 +851,52 @@ let rec is_subtype t1 t2 =
         | Integer(i) -> (Class "Int")
         | String(s) -> (Class "String")
         | New((_, tname)) -> 
-        if tname = "SELF_TYPE" then
-            SELF_TYPE !current_class
-        else
-            Class tname
-            | Dynamic_Dispatch(e0, (f_loc, f_name), args) ->
-              (*receiever *)
-              let t0 = typecheck o e0 in
-              (* typecheck args on method called on reciever*)
-              let arg_types = List.map (typecheck o) args in
-              let t00 = match t0 with
-                | SELF_TYPE _ -> Class !current_class
-                | _ -> t0
-              in
-              let (formal_types, return_type) = 
-                let get_class_name t = match t with
-                  | Class(c) -> c
-                  | _ -> failwith "unexpected type"
-                in
-                try 
-                  match find_method_in_class (get_class_name t00) f_name with
-                  | Method(_, formals, (_, return_type), _) -> 
-                      (List.map (fun (_, t) -> t) formals, return_type)
-                  | _ -> failwith "Expected a method"
-                with Not_found ->
-                  printf "ERROR: %s: Type-Check: method %s not found in class %s\n" f_loc f_name (type_to_str t00);
-                  exit 1
-              in
-              if List.length formal_types <> List.length arg_types then begin
-                printf "ERROR: %s: Type-Check: method %s called with wrong number of arguments\n" f_loc f_name;
-                exit 1
-              end;
-              List.iter2 (fun t arg_t ->
-                if not (is_subtype arg_t t) then begin
-                  printf "ERROR: %s: Type-Check: argument type %s does not conform to formal type %s\n" f_loc (type_to_str arg_t) (type_to_str t);
-                  exit 1
-                end
-              ) (List.map (fun (_, t) -> if t = "SELF_TYPE" then SELF_TYPE !current_class else Class t) formal_types) arg_types;
-              let t_return = if return_type = "SELF_TYPE" then SELF_TYPE !current_class else Class return_type in
-              t_return
+          if tname = "SELF_TYPE" then
+              SELF_TYPE !current_class
+          else
+              Class tname
+        | Dynamic_Dispatch(e0, (f_loc, f_name), args) ->
+          (*receiever *)
+          (* will be SELF_TYPE if called on current object (using self)*)
+          let t0 = typecheck o e0 in
+          (* typecheck args on method called on reciever*)
+          let arg_types = List.map (typecheck o) args in
+          let t00 = match t0 with
+            (* get C if self type*)
+            | SELF_TYPE _ -> Class !current_class
+            | _ -> t0
+          in
+          let (formal_types, return_type) = 
+            let get_class_name t = match t with
+              | Class(c) -> c
+              | _ -> failwith "unexpected type"
+            in
+            try 
+              match find_method_in_class (get_class_name t00) f_name with
+              | Method(_, formals, (_, return_type), _) -> 
+                (*formals arent types!*)
+                  (List.map (fun (_,t) -> t) formals, return_type)
+              | _ -> failwith "Expected a method"
+            with Not_found ->
+              printf "ERROR: %s: Type-Check: method %s not found in class %s\n" f_loc f_name (type_to_str t00);
+              exit 1
+          in
+          if List.length formal_types <> List.length arg_types then begin
+            printf "ERROR: %s: Type-Check: method %s called with wrong number of arguments\n" f_loc f_name;
+            exit 1
+          end;
+          List.iter2 (fun t arg_t ->
+            if not (is_subtype arg_t t) then begin
+              printf "ERROR: %s: Type-Check: argument type %s does not conform to formal type %s\n" f_loc (type_to_str arg_t) (type_to_str t);
+              exit 1
+            end
+          ) (List.map (fun (_, t) -> if t = "SELF_TYPE" then SELF_TYPE !current_class else Class t) formal_types) arg_types;
+          (* bug fixed!
+          Should use current class C,
+          instead return t0 if SELF_TYPE
+          *)
+          let t_return = if return_type = "SELF_TYPE" then t0 else Class return_type in
+          t_return
           | Static_Dispatch(e0, (t_loc, t_name), (f_loc, f_name), args) ->
               let t0 = typecheck o e0 in
               let t = Class t_name in
@@ -902,7 +909,7 @@ let rec is_subtype t1 t2 =
                 try 
                   match find_method_in_class t_name f_name with
                   | Method(_, formals, (_, return_type), _) -> 
-                      (List.map (fun ((_, t), _) -> 
+                      (List.map (fun (_,(_, t)) -> 
                         if t = "SELF_TYPE" then 
                           SELF_TYPE !current_class 
                         else 
@@ -936,6 +943,7 @@ let rec is_subtype t1 t2 =
               let (formal_types, return_type) = 
                 try 
                   match find_method_in_class !current_class m_name with
+                  (* these are not getting the types! *)
                   | Method(_, formals, (_, return_type), _) -> (List.map (fun (_, t) -> t) formals, return_type)
                   | _ -> failwith "Expected a method"
                 with Not_found ->
@@ -1132,13 +1140,14 @@ let rec is_subtype t1 t2 =
     in
     (*iterate over every class and typecheck all features*)
     List.iter (fun((cloc,cname),inherits,features)->
+      (* printf "%s\n" cname; *)
     current_class := cname; 
     let o = build_object_environment_for_class parent_map ast cname in
     List.iter (fun feat -> 
         match feat with 
         | Attribute((nameloc,name),(dtloc,declared_type),Some(init_exp)) -> (
-            let expected_type = if declared_type = "SELF_TYPE" then SELF_TYPE !current_class else Class declared_type in
-            Hashtbl.add o "self" (SELF_TYPE !current_class);
+            let expected_type = if declared_type = "SELF_TYPE" then Class !current_class else Class declared_type in
+            Hashtbl.add o "self" (Class !current_class);
             let init_type = typecheck o init_exp in
             Hashtbl.remove o "self";
             if not (is_subtype init_type expected_type) then begin
@@ -1147,7 +1156,7 @@ let rec is_subtype t1 t2 =
             end
         )
         | Attribute((nameloc,name),(dtloc,declared_type),None) -> (
-            let expected_type = if declared_type = "SELF_TYPE" then SELF_TYPE !current_class else Class declared_type in
+            let expected_type = if declared_type = "SELF_TYPE" then Class !current_class else Class declared_type in
             if not (List.mem declared_type all_classes) then begin
                 printf "ERROR: %s: Type-Check: class %s has attribute %s with unknown type %s\n" dtloc cname name declared_type;
                 exit 1
@@ -1157,17 +1166,28 @@ let rec is_subtype t1 t2 =
       in scope when typechecking the  method body. *)
         | Method((mloc, mname),formals, (rtloc,return_type), mbody) -> (
             let o = build_object_environment_for_class parent_map ast cname in
-            Hashtbl.add o "self" (SELF_TYPE !current_class);
+            Hashtbl.add o "self" (Class !current_class);
+            (* printf "initially added %s\n" !current_class; *)
             List.iter (fun ((floc,fname), (_,ftype)) ->
-                Hashtbl.add o fname (if ftype = "SELF_TYPE" then SELF_TYPE !current_class else Class ftype)
+                Hashtbl.add o fname (if ftype = "SELF_TYPE" then Class !current_class else Class ftype)
             ) formals;
             let body_type = typecheck o mbody in
-              
-            let expected_type = if return_type = "SELF_TYPE" then SELF_TYPE(!current_class) else Class return_type in
+            let expected_type = if return_type = "SELF_TYPE" then begin 
+              (* printf "then added %s\n" !current_class; *)
+              Class !current_class
+            end
+            else Class return_type 
+            in
+              (* printf "expected type is %s\n" (type_to_str expected_type); *)
             if not (is_subtype body_type expected_type) then begin
                 printf "ERROR: %s: Type-Check: method %s return type should be %s but got %s\n" mloc mname (type_to_str expected_type) (type_to_str body_type);
                 exit 1
-            end
+            end;
+
+            List.iter (fun ((_,fname),_)->
+              Hashtbl.remove o fname
+            ) formals;
+            Hashtbl.remove o "self";
         )
         | _ -> ()
     ) features;
