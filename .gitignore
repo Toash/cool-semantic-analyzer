@@ -1,5 +1,6 @@
 a.out
 *.cmi
 *.cmo
+*.cl-ast
 *.cl-type
 testing.ml

@@ -816,16 +816,14 @@ let rec is_subtype t1 t2 =
           let t0 = typecheck o e0 in
           (* typecheck args on method called on reciever*)
           let arg_types = List.map (typecheck o) args in
+
+          (* T0'*)
           let t00 = match t0 with
             (* get C if self type*)
             | SELF_TYPE _ -> Class !current_class
             | _ -> t0
           in
           let (formal_types, return_type) = 
-            let get_class_name t = match t with
-              | Class(c) -> c
-              | _ -> failwith "unexpected type"
-            in
             try 
               match find_method_in_class (get_class_name t00) f_name with
               | Method(_, formals, (_, return_type), _) -> 
@@ -840,6 +838,7 @@ let rec is_subtype t1 t2 =
             printf "ERROR: %s: Type-Check: method %s called with wrong number of arguments\n" f_loc f_name;
             exit 1
           end;
+          (* check if argument types conform to formal types*)
           List.iter2 (fun t arg_t ->
             if not (is_subtype arg_t t) then begin
               printf "ERROR: %s: Type-Check: argument type %s does not conform to formal type %s\n" f_loc (type_to_str arg_t) (type_to_str t);
@@ -866,11 +865,11 @@ let rec is_subtype t1 t2 =
                   | Method(_, formals, (_, return_type), _) -> 
                       (List.map (fun (_,(_, t)) -> 
                         if t = "SELF_TYPE" then 
-                          SELF_TYPE !current_class 
+                          Class !current_class 
                         else 
                           Class t) formals, 
                           if return_type = "SELF_TYPE" then 
-                            SELF_TYPE !current_class 
+                            Class !current_class 
                         else Class return_type)
                   | _ -> failwith "Expected a method"
                 with Not_found -> 
@@ -893,7 +892,7 @@ let rec is_subtype t1 t2 =
               in
               t_return
           | Self_Dispatch((m_loc, m_name), exp_list) ->
-              let t0 = SELF_TYPE !current_class in
+              (* let t0 = SELF_TYPE !current_class in *)
               let arg_types = List.map (typecheck o) exp_list in
               let (formal_types, return_type) = 
                 try 
@@ -973,7 +972,7 @@ let rec is_subtype t1 t2 =
           let t0 = typecheck o e0 in
           let case_types = List.map (fun ((_, x), (_, t), e) ->
               (* type check each case body with its corresponding variable in extended object map *)
-              let case_type = if t = "SELF_TYPE" then SELF_TYPE !current_class else Class t in
+              let case_type = if t = "SELF_TYPE" then Class !current_class else Class t in
               Hashtbl.add o x case_type;
               let t0i = typecheck o e in
               Hashtbl.remove o x;
