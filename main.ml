@@ -1454,13 +1454,6 @@ let rec is_subtype t1 t2 =
                         
     )) ast;
 
-  (* 
-            test if ast is the same here
-  List.iter (fun ((_,cname),_,features) -> (
-  printf "%s features for class %s\n" (string_of_int(List.length features)) cname;
-  )
-    ) ast; *)
-    (* Hashtbl.iter (fun key value -> Printf.printf "Parent of %s is %s\n" key value) parent_map; *)
 
    close_out fout;
 end ;;
